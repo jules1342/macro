@@ -1,5 +1,16 @@
 const fs = require('fs');
 const path = require('path');
+// Babel has gone missing from node_modules more than once, because the parent
+// folder is a synced drive that prunes it. Rather than fail with a stack trace,
+// restore it and carry on. Deps are declared in package.json.
+function ensureBabel() {
+  try { require.resolve('@babel/preset-react'); require.resolve('@babel/core'); return; }
+  catch (_) {}
+  console.log('Babel missing from node_modules, installing...');
+  require('child_process').execSync('npm install --no-save @babel/core @babel/preset-react',
+    { cwd: __dirname, stdio: 'inherit' });
+}
+ensureBabel();
 const babel = require('@babel/core');
 
 // Paths resolve from this script, so the build runs from any working directory

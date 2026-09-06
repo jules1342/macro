@@ -5,7 +5,7 @@
 //     to cache when offline.
 //   - Static assets (icons, manifest): cache-first.
 //   - Anthropic API: never intercepted.
-const CACHE = 'macro-v1';
+const CACHE = 'macro-v2';
 const SHELL = ['./', './index.html', './manifest.webmanifest', './icon-192.png', './icon-512.png'];
 
 self.addEventListener('install', (e) => {

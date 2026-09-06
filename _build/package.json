@@ -1,0 +1,9 @@
+{
+  "name": "macro-build",
+  "private": true,
+  "description": "Build tooling for the Macro app. Deps are declared so a wiped node_modules can be restored with npm install.",
+  "dependencies": {
+    "@babel/core": "^7.24.0",
+    "@babel/preset-react": "^7.24.0"
+  }
+}
