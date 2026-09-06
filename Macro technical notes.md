@@ -75,6 +75,18 @@ The symptom is worth recognising, because it is quiet: the headline kg/week disa
 
 The related fix: the TDEE intake loop stops before the final weigh-in day. `daysSpan` is elapsed time between two weigh-ins, so the intake days have to match it. Counting the last day too produced impossible coverage like "15/14 days".
 
+## Maintenance over time
+
+`tdeeSeries` in the Trends view. For each day, take the weigh-in nearest that day and the one nearest `TDEE_WINDOW` (28) days earlier, each within 3 days; sum the food logged between them; require at least 60% of those days logged; then the same energy-balance sum as the headline figure. Days that fail any of that are `null` and the chart line breaks there. The chart reuses `IntakeChart` with `avg` set equal to `val`, so there is no second smoothing pass on top of the window.
+
+## Dates
+
+Every storage key is a local `YYYY-MM-DD` from `dateStr()`. Do not use `toISOString().split('T')[0]` for a key: it is the UTC date, which in Australia is yesterday until about 10 am. That one mistake put a seeded "today" entry under the wrong day during testing and would do the same to a real log at dinner time. Older loops in `buildSeries` and the TDEE windows still use `toISOString` internally; they are consistent with themselves because they iterate from a UTC-derived start, but any new code should use `dateStr`.
+
+## Storage
+
+localStorage, about 5 MB. Photo meals now carry a 256px thumbnail (~10 KB), which is the only large thing stored. `S.set` throws a tagged `quota` error when the store is full instead of swallowing it; `saveLog` catches that, retries the day without its images, and alerts. Before this a full store silently dropped the entry.
+
 ## Decisions that look wrong but are not
 
 - **Label energy.** The model only transcribes raw kJ and kcal. The code does the kJ to kcal conversion. This is deliberate, because the model gets the arithmetic wrong. Do not have the model output kcal directly.

@@ -1645,8 +1645,9 @@ function ZoomablePreview({
     onClose: () => setOpen(false)
   }));
 }
-const BUILD_VERSION = '2026-09-06h-items-measures-safety';
+const BUILD_VERSION = '2026-09-06i-trends-history-thumbs';
 const SMOOTH_DAYS = 14;
+const TDEE_WINDOW = 28;
 const DIAG_KEY = 'macro_diag_error';
 const LOG_KEY = 'macro_error_log';
 const PHOTO_BEACON_KEY = 'macro_photo_beacon';
@@ -4973,6 +4974,7 @@ function PhotoTab({
   const [mode, setMode] = useState(fixedMode || 'food');
   const [preview, setPreview] = useState(null);
   const [visionData, setVisionData] = useState(null);
+  const [thumb, setThumb] = useState(null);
   const [loading, setLoading] = useState(false);
   const [err, setErr] = useState(null);
   const [result, setResult] = useState(null);
@@ -5024,6 +5026,11 @@ function PhotoTab({
       const vd = await compressForVision(f);
       setVisionData(vd);
       setPreview(vd);
+      try {
+        setThumb(await compressImageToDataURL(f, 256, 0.7));
+      } catch (_) {
+        setThumb(null);
+      }
       URL.revokeObjectURL(previewUrl);
       if (useMode === 'label') {
         const r = await analyseLabelImage(vd, apiKey);
@@ -5349,6 +5356,7 @@ function PhotoTab({
     }, result.notes)),
     onSave: () => onSave({
       ...result,
+      imageData: thumb || undefined,
       source: 'photo'
     }),
     showPortion: true
@@ -7041,6 +7049,54 @@ function WeightView({
   };
   const calorieSeries = useMemo(() => buildSeries('calories'), [logs]);
   const proteinSeries = useMemo(() => buildSeries('protein'), [logs]);
+  const tdeeSeries = useMemo(() => {
+    if (sorted.length < 2) return [];
+    const tsOfW = w => new Date(w.date + 'T00:00:00').getTime();
+    const nearest = ts => {
+      let best = null,
+        bestD = Infinity;
+      for (const w of sorted) {
+        const d = Math.abs(tsOfW(w) - ts);
+        if (d < bestD) {
+          bestD = d;
+          best = w;
+        }
+      }
+      return bestD <= 3 * 86400000 ? best : null;
+    };
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+    const first = tsOfW(sorted[0]);
+    const out = [];
+    for (let t = first + TDEE_WINDOW * 86400000; t <= today.getTime(); t += 86400000) {
+      const wEnd = nearest(t),
+        wStart = nearest(t - TDEE_WINDOW * 86400000);
+      let val = null;
+      if (wEnd && wStart && wEnd.date > wStart.date) {
+        const a = new Date(wStart.date + 'T00:00:00'),
+          b = new Date(wEnd.date + 'T00:00:00');
+        const span = (b - a) / 86400000;
+        let total = 0,
+          days = 0;
+        for (const d = new Date(a); d < b; d.setDate(d.getDate() + 1)) {
+          const cal = (logs[dateStr(d)] || []).reduce((s, e) => s + num(e.calories), 0);
+          if (cal > 0) {
+            total += cal;
+            days++;
+          }
+        }
+        if (span >= 10 && days >= span * 0.6) {
+          val = Math.round(total / days - (wEnd.kg - wStart.kg) * 7700 / span);
+        }
+      }
+      out.push({
+        date: dateStr(new Date(t)),
+        val,
+        avg: val
+      });
+    }
+    return out;
+  }, [sorted, logs]);
   const domain = useMemo(() => {
     const today = new Date();
     today.setHours(0, 0, 0, 0);
@@ -7083,8 +7139,8 @@ function WeightView({
     setNewKg('');
   };
   return React.createElement("div", null, React.createElement(Header, {
-    pretitle: "Weight",
-    title: "Trend & deficit analysis"
+    pretitle: "Trends",
+    title: "Weight, intake & maintenance"
   }), React.createElement("div", {
     style: cardStyle
   }, React.createElement("div", {
@@ -7273,7 +7329,27 @@ function WeightView({
     higherIsBetter: true,
     domainStart: domain.start,
     domainEnd: domain.end
-  }), stats && React.createElement("div", {
+  }), tdeeSeries.filter(p => p.val !== null).length >= 2 && React.createElement("div", {
+    style: cardStyle
+  }, React.createElement("div", {
+    style: mutedStyle
+  }, "Maintenance over time"), React.createElement("div", {
+    style: {
+      fontSize: 12,
+      color: C.inkSoft,
+      marginTop: 4,
+      marginBottom: 6,
+      lineHeight: 1.45
+    }
+  }, "Each point is the TDEE estimate from the ", TDEE_WINDOW, " days ending that day. A steady line means your maintenance is stable; a drift down over months is the metabolic adaptation you would expect on a cut."), React.createElement(IntakeChart, {
+    series: tdeeSeries,
+    target: null,
+    colour: C.ink,
+    padFloor: 60,
+    domainStart: domain.start,
+    domainEnd: domain.end,
+    emptyLabel: "Not enough overlapping weight and food data in this range."
+  })), stats && React.createElement("div", {
     style: cardStyle
   }, React.createElement("div", {
     style: mutedStyle
@@ -7419,21 +7495,23 @@ function WeightView({
       color: C.inkSoft,
       marginTop: 4
     }
-  }, "Weighted estimate across ", tdeeEst.windows.length, " time window", tdeeEst.windows.length !== 1 ? 's' : '', ", favouring recent data."), React.createElement("div", {
+  }, "Weighted estimate across ", tdeeEst.windows.length, " time window", tdeeEst.windows.length !== 1 ? 's' : '', ", favouring recent data."), React.createElement("details", {
     style: {
       marginTop: 16,
       paddingTop: 14,
       borderTop: `1px solid ${C.line}`
     }
-  }, React.createElement("div", {
+  }, React.createElement("summary", {
     style: {
       fontSize: 11,
       color: C.inkSoft,
       textTransform: 'uppercase',
       letterSpacing: '0.06em',
-      marginBottom: 8
+      marginBottom: 8,
+      cursor: 'pointer',
+      listStyle: 'none'
     }
-  }, "By window"), React.createElement("div", {
+  }, "By window ▸"), React.createElement("div", {
     style: {
       display: 'flex',
       flexDirection: 'column',
@@ -7576,6 +7654,27 @@ function HistoryView({
   onEdit
 }) {
   const dates = useMemo(() => Object.keys(logs).sort().reverse(), [logs]);
+  const months = useMemo(() => {
+    const map = new Map();
+    for (const d of dates) {
+      const key = d.slice(0, 7);
+      if (!map.has(key)) map.set(key, []);
+      map.get(key).push(d);
+    }
+    return [...map.entries()].map(([key, ds]) => {
+      const cal = ds.reduce((s, d) => s + (logs[d] || []).reduce((a, e) => a + num(e.calories), 0), 0);
+      return {
+        key,
+        dates: ds,
+        label: new Date(key + '-01T00:00:00').toLocaleDateString('en-AU', {
+          month: 'long',
+          year: 'numeric'
+        }),
+        avg: Math.round(cal / ds.length)
+      };
+    });
+  }, [dates, logs]);
+  const thisMonth = todayStr().slice(0, 7);
   const weightMap = useMemo(() => {
     const m = {};
     weights.forEach(w => {
@@ -7593,13 +7692,40 @@ function HistoryView({
       color: C.inkMuted,
       padding: '32px 20px'
     }
-  }, "No history yet. Days you log food will show up here."), React.createElement("div", {
+  }, "No history yet. Days you log food will show up here."), months.map(m => React.createElement("details", {
+    key: m.key,
+    open: m.key === thisMonth,
+    style: {
+      marginBottom: 14
+    }
+  }, React.createElement("summary", {
+    style: {
+      listStyle: 'none',
+      cursor: 'pointer',
+      display: 'flex',
+      alignItems: 'baseline',
+      justifyContent: 'space-between',
+      padding: '6px 2px 10px'
+    }
+  }, React.createElement("span", {
+    className: "display",
+    style: {
+      fontSize: 18,
+      fontWeight: 500
+    }
+  }, m.label), React.createElement("span", {
+    className: "num",
+    style: {
+      fontSize: 12,
+      color: C.inkMuted
+    }
+  }, m.dates.length, " day", m.dates.length === 1 ? '' : 's', " · avg ", m.avg.toLocaleString(), " kcal")), React.createElement("div", {
     style: {
       display: 'flex',
       flexDirection: 'column',
       gap: 10
     }
-  }, dates.map(date => {
+  }, m.dates.map(date => {
     const entries = logs[date] || [];
     const t = entries.reduce((a, e) => ({
       cal: a.cal + num(e.calories),
@@ -7730,7 +7856,7 @@ function HistoryView({
         fontSize: 14
       }
     }, Math.round(e.calories))))));
-  })));
+  })))));
 }
 function ErrorLogCard() {
   const [log, setLog] = useState(() => {
@@ -8788,8 +8914,8 @@ function TabBar({
     Icon: IconHome
   }, {
     v: 'weight',
-    l: 'Weight',
-    Icon: IconScale
+    l: 'Trends',
+    Icon: IconTrendUp
   }, {
     v: 'history',
     l: 'History',

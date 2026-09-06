@@ -1048,9 +1048,11 @@ Return ONLY a JSON object (no markdown, no preamble):
     // while the camera intent is foregrounded), the tab silently reloads.
     // We use localStorage (not sessionStorage) because a full process kill
     // can wipe sessionStorage but leaves localStorage intact.
-    const BUILD_VERSION = '2026-09-06h-items-measures-safety';
+    const BUILD_VERSION = '2026-09-06i-trends-history-thumbs';
     // Window for the rolling-average line on the intake charts, in days.
     const SMOOTH_DAYS = 14;
+    // Trailing window for each point on the maintenance-over-time chart.
+    const TDEE_WINDOW = 28;
     const DIAG_KEY = 'macro_diag_error';
     const LOG_KEY = 'macro_error_log';
     const PHOTO_BEACON_KEY = 'macro_photo_beacon';
@@ -3043,6 +3045,7 @@ Return ONLY a JSON object (no markdown, no preamble):
       const [mode, setMode] = useState(fixedMode || 'food');
       const [preview, setPreview] = useState(null);
       const [visionData, setVisionData] = useState(null);
+      const [thumb, setThumb] = useState(null);   // 256px copy kept with the entry
       const [loading, setLoading] = useState(false);
       const [err, setErr] = useState(null);
       // Food-mode state
@@ -3084,6 +3087,9 @@ Return ONLY a JSON object (no markdown, no preamble):
           const vd = await compressForVision(f);
           setVisionData(vd);
           setPreview(vd);
+          // Small thumbnail kept with the entry, so History and Edit can show
+          // what was eaten. ~10 KB, so a year of photo meals fits in storage.
+          try { setThumb(await compressImageToDataURL(f, 256, 0.7)); } catch (_) { setThumb(null); }
           URL.revokeObjectURL(previewUrl);
 
           if (useMode === 'label') {
@@ -3325,7 +3331,7 @@ Return ONLY a JSON object (no markdown, no preamble):
                         {result.notes && <div style={{marginTop: 4, color: C.inkSoft, fontStyle: 'italic'}}>{result.notes}</div>}
                       </div>
                     )}
-                    onSave={() => onSave({...result, source: 'photo'})}
+                    onSave={() => onSave({...result, imageData: thumb || undefined, source: 'photo'})}
                     showPortion/>
 
                   {corrections.length > 0 && (
@@ -4301,6 +4307,42 @@ Return ONLY a JSON object (no markdown, no preamble):
       const calorieSeries = useMemo(() => buildSeries('calories'), [logs]);
       const proteinSeries = useMemo(() => buildSeries('protein'), [logs]);
 
+      // Maintenance calories over time. For each day, a trailing window ending
+      // there: the weigh-in nearest each end (within 3 days), the intake logged
+      // between them, and the same energy-balance sum as the headline figure.
+      // 28 days rather than 14, because a fortnight of daily weight noise still
+      // swings the estimate by hundreds of kcal.
+      const tdeeSeries = useMemo(() => {
+        if (sorted.length < 2) return [];
+        const tsOfW = (w) => new Date(w.date + 'T00:00:00').getTime();
+        const nearest = (ts) => {
+          let best = null, bestD = Infinity;
+          for (const w of sorted) { const d = Math.abs(tsOfW(w) - ts); if (d < bestD) { bestD = d; best = w; } }
+          return bestD <= 3 * 86400000 ? best : null;
+        };
+        const today = new Date(); today.setHours(0, 0, 0, 0);
+        const first = tsOfW(sorted[0]);
+        const out = [];
+        for (let t = first + TDEE_WINDOW * 86400000; t <= today.getTime(); t += 86400000) {
+          const wEnd = nearest(t), wStart = nearest(t - TDEE_WINDOW * 86400000);
+          let val = null;
+          if (wEnd && wStart && wEnd.date > wStart.date) {
+            const a = new Date(wStart.date + 'T00:00:00'), b = new Date(wEnd.date + 'T00:00:00');
+            const span = (b - a) / 86400000;
+            let total = 0, days = 0;
+            for (const d = new Date(a); d < b; d.setDate(d.getDate() + 1)) {
+              const cal = (logs[dateStr(d)] || []).reduce((s, e) => s + num(e.calories), 0);
+              if (cal > 0) { total += cal; days++; }
+            }
+            if (span >= 10 && days >= span * 0.6) {
+              val = Math.round(total / days - (wEnd.kg - wStart.kg) * 7700 / span);
+            }
+          }
+          out.push({ date: dateStr(new Date(t)), val, avg: val });
+        }
+        return out;
+      }, [sorted, logs]);
+
       // Shared x-axis window for both charts, driven by the range selector.
       const domain = useMemo(() => {
         const today = new Date(); today.setHours(0, 0, 0, 0);
@@ -4332,7 +4374,7 @@ Return ONLY a JSON object (no markdown, no preamble):
 
       return (
         <div>
-          <Header pretitle="Weight" title="Trend & deficit analysis"/>
+          <Header pretitle="Trends" title="Weight, intake & maintenance"/>
 
           <div style={cardStyle}>
             <div style={{ display: 'flex', gap: 10, alignItems: 'flex-end' }}>
@@ -4397,6 +4439,18 @@ Return ONLY a JSON object (no markdown, no preamble):
           <IntakeCard label="Protein" unit="g" series={proteinSeries} target={targets?.protein}
             colour={C.green} padFloor={5} higherIsBetter
             domainStart={domain.start} domainEnd={domain.end}/>
+
+          {tdeeSeries.filter(p => p.val !== null).length >= 2 && (
+            <div style={cardStyle}>
+              <div style={mutedStyle}>Maintenance over time</div>
+              <div style={{ fontSize: 12, color: C.inkSoft, marginTop: 4, marginBottom: 6, lineHeight: 1.45 }}>
+                Each point is the TDEE estimate from the {TDEE_WINDOW} days ending that day. A steady line means your maintenance is stable; a drift down over months is the metabolic adaptation you would expect on a cut.
+              </div>
+              <IntakeChart series={tdeeSeries} target={null} colour={C.ink} padFloor={60}
+                domainStart={domain.start} domainEnd={domain.end}
+                emptyLabel="Not enough overlapping weight and food data in this range."/>
+            </div>
+          )}
 
           {stats && (
             <div style={cardStyle}>
@@ -4485,8 +4539,8 @@ Return ONLY a JSON object (no markdown, no preamble):
                 Weighted estimate across {tdeeEst.windows.length} time window{tdeeEst.windows.length !== 1 ? 's' : ''}, favouring recent data.
               </div>
 
-              <div style={{ marginTop: 16, paddingTop: 14, borderTop: `1px solid ${C.line}` }}>
-                <div style={{ fontSize: 11, color: C.inkSoft, textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: 8 }}>By window</div>
+              <details style={{ marginTop: 16, paddingTop: 14, borderTop: `1px solid ${C.line}` }}>
+                <summary style={{ fontSize: 11, color: C.inkSoft, textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: 8, cursor: 'pointer', listStyle: 'none' }}>By window ▸</summary>
                 <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
                   {tdeeEst.windows.map((w, i) => (
                     <div key={i} style={{ display: 'grid', gridTemplateColumns: '70px 1fr auto', gap: 10, alignItems: 'baseline', fontSize: 13 }}>
@@ -4500,7 +4554,7 @@ Return ONLY a JSON object (no markdown, no preamble):
                     </div>
                   ))}
                 </div>
-              </div>
+              </details>
             </div>
           )}
 
@@ -4561,6 +4615,25 @@ Return ONLY a JSON object (no markdown, no preamble):
     // ====================== HISTORY ======================
     function HistoryView({ logs, targets, weights, onEdit }) {
       const dates = useMemo(() => Object.keys(logs).sort().reverse(), [logs]);
+      // Group by month so a long history is a handful of sections, not
+      // hundreds of cards mounted at once. The current month starts open.
+      const months = useMemo(() => {
+        const map = new Map();
+        for (const d of dates) {
+          const key = d.slice(0, 7);
+          if (!map.has(key)) map.set(key, []);
+          map.get(key).push(d);
+        }
+        return [...map.entries()].map(([key, ds]) => {
+          const cal = ds.reduce((s, d) => s + (logs[d] || []).reduce((a, e) => a + num(e.calories), 0), 0);
+          return {
+            key, dates: ds,
+            label: new Date(key + '-01T00:00:00').toLocaleDateString('en-AU', { month: 'long', year: 'numeric' }),
+            avg: Math.round(cal / ds.length)
+          };
+        });
+      }, [dates, logs]);
+      const thisMonth = todayStr().slice(0, 7);
       const weightMap = useMemo(() => {
         const m = {};
         weights.forEach(w => { m[w.date] = w.kg; });
@@ -4575,8 +4648,14 @@ Return ONLY a JSON object (no markdown, no preamble):
               No history yet. Days you log food will show up here.
             </div>
           )}
+          {months.map(m => (
+          <details key={m.key} open={m.key === thisMonth} style={{ marginBottom: 14 }}>
+            <summary style={{ listStyle: 'none', cursor: 'pointer', display: 'flex', alignItems: 'baseline', justifyContent: 'space-between', padding: '6px 2px 10px' }}>
+              <span className="display" style={{ fontSize: 18, fontWeight: 500 }}>{m.label}</span>
+              <span className="num" style={{ fontSize: 12, color: C.inkMuted }}>{m.dates.length} day{m.dates.length === 1 ? '' : 's'} · avg {m.avg.toLocaleString()} kcal</span>
+            </summary>
           <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
-            {dates.map(date => {
+            {m.dates.map(date => {
               const entries = logs[date] || [];
               const t = entries.reduce((a, e) => ({
                 cal: a.cal + num(e.calories), p: a.p + num(e.protein),
@@ -4633,6 +4712,8 @@ Return ONLY a JSON object (no markdown, no preamble):
               );
             })}
           </div>
+          </details>
+          ))}
         </div>
       );
     }
@@ -5131,7 +5212,7 @@ Return ONLY a JSON object (no markdown, no preamble):
     function TabBar({ view, setView, onAdd }) {
       const tabs = [
         { v: 'today', l: 'Today', Icon: IconHome },
-        { v: 'weight', l: 'Weight', Icon: IconScale },
+        { v: 'weight', l: 'Trends', Icon: IconTrendUp },
         { v: 'history', l: 'History', Icon: IconCalendar },
         { v: 'settings', l: 'Settings', Icon: IconSettings },
       ];
