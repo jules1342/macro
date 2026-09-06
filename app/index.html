@@ -701,7 +701,7 @@ const imageToParts = async fileOrDataUrl => {
   };
 };
 const DRIVE_CLIENT_ID = '662075205003-gfgqm2s951u7hfnne86ok12trlvfdjom.apps.googleusercontent.com';
-const DRIVE_PATH = ['Macros', 'App Data'];
+const DRIVE_PATH = ['App Data', 'Macros'];
 const DRIVE_FOLDER = DRIVE_PATH.join(' / ');
 const DRIVE_FILE = 'macro.json';
 const gis = {
@@ -1592,7 +1592,7 @@ function ZoomablePreview({
     onClose: () => setOpen(false)
   }));
 }
-const BUILD_VERSION = '2026-09-06d-drive-folder-path';
+const BUILD_VERSION = '2026-09-06e-appdata-macros';
 const SMOOTH_DAYS = 14;
 const DIAG_KEY = 'macro_diag_error';
 const LOG_KEY = 'macro_error_log';

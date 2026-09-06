@@ -361,14 +361,15 @@
     // it is useless anywhere else. To rotate it, delete the client in the Google
     // Cloud console and create a new one; do not try to scrub it from git.
     const DRIVE_CLIENT_ID = '662075205003-gfgqm2s951u7hfnne86ok12trlvfdjom.apps.googleusercontent.com';
-    // Drive layout, the standing convention for Julian's apps: one top-level
-    // folder per app, with an "App Data" folder inside it.
+    // Drive layout, the standing convention for Julian's apps: one shared
+    // "App Data" folder at the Drive root, holding one folder per app.
     //
-    // Deliberately NOT a shared "App Data" parent holding one folder per app.
-    // The drive.file scope only lets an app see files it created itself, so a
-    // second app would be blind to this folder and would quietly create its own
-    // duplicate alongside it. A per-app top folder has no such collision.
-    const DRIVE_PATH = ['Macros', 'App Data'];
+    // For this to work across apps they must SHARE this OAuth client ID. The
+    // drive.file scope only lets a client see files it created, so a second app
+    // on its own client would be blind to "App Data" and would quietly make a
+    // duplicate. All of Julian's apps are served from the same origin
+    // (https://jules1342.github.io), so one client ID covers them all.
+    const DRIVE_PATH = ['App Data', 'Macros'];
     const DRIVE_FOLDER = DRIVE_PATH.join(' / ');
     const DRIVE_FILE = 'macro.json';
     const gis = { token: null, exp: 0, client: null };
@@ -972,7 +973,7 @@ Return ONLY a JSON object (no markdown, no preamble):
     // while the camera intent is foregrounded), the tab silently reloads.
     // We use localStorage (not sessionStorage) because a full process kill
     // can wipe sessionStorage but leaves localStorage intact.
-    const BUILD_VERSION = '2026-09-06d-drive-folder-path';
+    const BUILD_VERSION = '2026-09-06e-appdata-macros';
     // Window for the rolling-average line on the intake charts, in days.
     const SMOOTH_DAYS = 14;
     const DIAG_KEY = 'macro_diag_error';
