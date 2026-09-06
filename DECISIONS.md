@@ -25,6 +25,7 @@ Build and maintain Macro, Julian's personal food and macro tracker app.
 - **2026-09-06, History is grouped by month,** current month open, so a long history is a few sections rather than every day mounted at once.
 - **2026-09-06, photo meals keep a 256px thumbnail,** about 10 KB, so History and Edit can show what was eaten. If storage fills, the day is saved again without its images and the user is told, rather than the entry vanishing.
 - **2026-09-06, backups are a whitelist.** Only profile, targets, weights, favourites and the daily logs. The camera lens choice, the error log and the crash beacon are device-specific and used to ride into Drive and onto the next phone.
+- **2026-09-06, long explanations sit behind an (i) toggle.** `InfoNote` shows a one-line summary with an i button that reveals the paragraph. Used for the maintenance-over-time method, the energy-balance note, and the Drive and Backup blurbs. Use it for any new explanatory text longer than a line.
 - **Date keys are built from local time, never `toISOString()`.** In Australia the UTC date is yesterday for most of the evening. `dateStr()` is the one helper for this.
 - **No CDN dependencies.** React and the JSX transpile are inlined at build time. In June, an unpinned `@babel/standalone` changed its version and broke the app. The inline build is the fix.
 - **Capture uses `getUserMedia`, not the native camera.** Android kills the browser in the background when the camera app opens, and the photo is lost. Do not return to `<input capture>`.

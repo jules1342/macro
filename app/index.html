@@ -1645,7 +1645,7 @@ function ZoomablePreview({
     onClose: () => setOpen(false)
   }));
 }
-const BUILD_VERSION = '2026-09-06o-tdee-note';
+const BUILD_VERSION = '2026-09-06q-tdee-chart-in-card';
 const SMOOTH_DAYS = 14;
 const TDEE_WINDOW = 21;
 const DIAG_KEY = 'macro_diag_error';
@@ -7248,27 +7248,7 @@ function WeightView({
     higherIsBetter: true,
     domainStart: domain.start,
     domainEnd: domain.end
-  }), tdeeSeries.filter(p => p.val !== null).length >= 2 && React.createElement("div", {
-    style: cardStyle
-  }, React.createElement("div", {
-    style: mutedStyle
-  }, "Maintenance over time"), React.createElement("div", {
-    style: {
-      fontSize: 12,
-      color: C.inkSoft,
-      marginTop: 4,
-      marginBottom: 6,
-      lineHeight: 1.45
-    }
-  }, "Each dot is the TDEE estimate from the ", TDEE_WINDOW, " days ending that day, using your 7-day average weight at each end of the window rather than a single weigh-in. The line is a ", SMOOTH_DAYS, "-day average of those dots. This is total expenditure, exercise included, and nothing here tracks training, so a shift in the line can be a change in how much you moved rather than adaptation. A steady line means your maintenance is stable; a slow drift down on a cut, with training unchanged, is the adaptation you would expect."), React.createElement(IntakeChart, {
-    series: tdeeSeries,
-    target: null,
-    colour: C.ink,
-    padFloor: 60,
-    domainStart: domain.start,
-    domainEnd: domain.end,
-    emptyLabel: "Not enough overlapping weight and food data in this range."
-  })), stats && React.createElement("div", {
+  }), stats && React.createElement("div", {
     style: cardStyle
   }, React.createElement("div", {
     style: mutedStyle
@@ -7414,7 +7394,33 @@ function WeightView({
       color: C.inkSoft,
       marginTop: 4
     }
-  }, "Weighted estimate across ", tdeeEst.windows.length, " time window", tdeeEst.windows.length !== 1 ? 's' : '', ", favouring recent data."), React.createElement("details", {
+  }, "Weighted estimate across ", tdeeEst.windows.length, " time window", tdeeEst.windows.length !== 1 ? 's' : '', ", favouring recent data."), tdeeSeries.filter(p => p.val !== null).length >= 2 && React.createElement("div", {
+    style: {
+      marginTop: 16,
+      paddingTop: 14,
+      borderTop: `1px solid ${C.line}`
+    }
+  }, React.createElement("div", {
+    style: {
+      fontSize: 11,
+      color: C.inkSoft,
+      textTransform: 'uppercase',
+      letterSpacing: '0.06em'
+    }
+  }, "Over time"), React.createElement(InfoNote, {
+    summary: "How this is worked out",
+    style: {
+      marginBottom: 8
+    }
+  }, "Each dot is the TDEE estimate from the ", TDEE_WINDOW, " days ending that day, using your 7-day average weight at each end of the window rather than a single weigh-in. The line is a ", SMOOTH_DAYS, "-day average of those dots. This is total expenditure, exercise included, and nothing here tracks training, so a shift in the line can be a change in how much you moved rather than adaptation. A steady line means your maintenance is stable; a slow drift down on a cut, with training unchanged, is the adaptation you would expect."), React.createElement(IntakeChart, {
+    series: tdeeSeries,
+    target: null,
+    colour: C.ink,
+    padFloor: 60,
+    domainStart: domain.start,
+    domainEnd: domain.end,
+    emptyLabel: "Not enough overlapping weight and food data in this range."
+  })), React.createElement("details", {
     style: {
       marginTop: 16,
       paddingTop: 14,
@@ -7510,16 +7516,11 @@ function WeightView({
     }
   }, "Need at least 2 weigh-ins spanning 3+ days and 5+ days of logged food to estimate your TDEE.")), React.createElement("div", {
     style: {
-      padding: '12px 4px',
-      fontSize: 12,
-      color: C.inkSoft,
-      lineHeight: 1.5
+      padding: '4px 4px 14px'
     }
-  }, React.createElement("b", {
-    style: {
-      color: C.inkMuted
-    }
-  }, "A note:"), " Energy balance estimates use the rough figure of 7,700 kcal per kg, which mixes fat, lean mass and water. Daily weight fluctuates with hydration, sodium, glycogen, and gut contents. Trust 2+ week trends, not day-to-day changes. Under-logging is the most common reason TDEE estimates look \"wrong\"."), sorted.length > 0 && React.createElement("div", null, React.createElement(SectionHeader, null, "Log"), React.createElement("div", {
+  }, React.createElement(InfoNote, {
+    summary: "About these estimates"
+  }, "Energy balance estimates use the rough figure of 7,700 kcal per kg of body fat, which mixes fat, lean mass and water. Daily weight fluctuates with hydration, sodium, glycogen and gut contents, which is why the endpoints are 7-day averages. Trust trends of two weeks or more, not day-to-day changes. Under-logging is the most common reason TDEE estimates look wrong.")), sorted.length > 0 && React.createElement("div", null, React.createElement(SectionHeader, null, "Log"), React.createElement("div", {
     style: {
       display: 'flex',
       flexDirection: 'column',
@@ -8336,14 +8337,13 @@ function SettingsView({
     }
   }, "Targets currently set from weight-based recommendation.")), React.createElement(SectionHeader, null, "Backup & data"), React.createElement("div", {
     style: cardStyle
-  }, React.createElement("div", {
+  }, React.createElement(InfoNote, {
+    summary: "Why export",
     style: {
-      fontSize: 13,
-      color: C.inkMuted,
-      marginBottom: 14,
-      lineHeight: 1.5
+      marginTop: 0,
+      marginBottom: 14
     }
-  }, "Your data lives in this browser's storage at this URL. Export periodically so a device wipe or browser data clear doesn't lose your tracker."), React.createElement("input", {
+  }, "Your data lives in this browser's storage at this address. Export now and then so a device wipe or a cleared browser doesn't lose your tracker, and export before moving to a new phone or a new address, because storage does not follow you."), React.createElement("input", {
     ref: importRef,
     type: "file",
     accept: "application/json",
@@ -8384,16 +8384,15 @@ function SettingsView({
     size: 15
   }), " Import JSON"))), React.createElement(SectionHeader, null, "Google Drive sync"), React.createElement("div", {
     style: cardStyle
-  }, React.createElement("div", {
+  }, React.createElement(InfoNote, {
+    summary: "What sync does",
     style: {
-      fontSize: 13,
-      color: C.inkMuted,
-      marginBottom: 12,
-      lineHeight: 1.5
+      marginTop: 0,
+      marginBottom: 12
     }
   }, "Keeps a copy of your tracker in a folder called ", React.createElement("b", {
     style: {
-      color: C.ink
+      color: C.inkMuted
     }
   }, DRIVE_FOLDER), " in your Drive, so a new phone can be set up from it. Macro can only see files it created itself, never the rest of your Drive. Your API key is never included."), !driveOn ? React.createElement("button", {
     onClick: driveConnect,
@@ -8962,6 +8961,58 @@ function Header({
       lineHeight: 1.1
     }
   }, title));
+}
+function InfoNote({
+  summary,
+  children,
+  style
+}) {
+  const [open, setOpen] = useState(false);
+  return React.createElement("div", {
+    style: {
+      marginTop: 4,
+      ...style
+    }
+  }, React.createElement("button", {
+    onClick: () => setOpen(o => !o),
+    "aria-expanded": open,
+    style: {
+      background: 'transparent',
+      border: 'none',
+      padding: 0,
+      display: 'flex',
+      alignItems: 'center',
+      gap: 7,
+      color: open ? C.ink : C.inkMuted,
+      fontSize: 12,
+      fontFamily: fonts.body,
+      cursor: 'pointer'
+    }
+  }, React.createElement("span", {
+    style: {
+      width: 17,
+      height: 17,
+      borderRadius: 9,
+      flexShrink: 0,
+      border: `1.5px solid ${open ? C.accent : C.inkSoft}`,
+      color: open ? C.accent : C.inkSoft,
+      fontSize: 11,
+      fontWeight: 700,
+      display: 'inline-flex',
+      alignItems: 'center',
+      justifyContent: 'center',
+      fontFamily: fonts.display,
+      fontStyle: 'italic',
+      lineHeight: 1
+    }
+  }, "i"), React.createElement("span", null, summary)), open && React.createElement("div", {
+    style: {
+      fontSize: 12,
+      color: C.inkSoft,
+      marginTop: 8,
+      lineHeight: 1.5
+    }
+  }, children));
 }
 function ConfirmDelete({
   onConfirm,
