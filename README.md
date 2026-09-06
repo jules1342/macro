@@ -36,18 +36,25 @@ Settings, paste the key from console.anthropic.com. It stays in the browser stor
 ## Google Drive sync (optional, one-time setup, about 10 minutes)
 The app needs an OAuth client ID that is allowed to run from this site's address.
 
-1. Go to https://console.cloud.google.com and sign in with the Google account whose Drive you want to use.
-2. Create a project, any name.
-3. APIs & Services, Library, search for "Google Drive API", Enable.
-4. APIs & Services, OAuth consent screen. Choose External, fill in the app name and your email, and add yourself as a test user.
-5. APIs & Services, Credentials, Create credentials, OAuth client ID, Web application.
-   Under **Authorised JavaScript origins** add exactly:
+Google reorganised this part of the console in 2024 and 2025. There is no longer a page called "OAuth consent screen". It is now **Google Auth Platform**, split into Branding, Audience, Data Access and Clients. Older guides on the web still describe the old layout.
+
+1. Go to https://console.cloud.google.com and sign in with the Google account whose Drive you want to use. Create a project, any name, and make sure it is selected in the bar at the top.
+2. **Enable the API.** APIs & Services, Library, search for "Google Drive API", Enable.
+3. **Open Google Auth Platform.** Type it into the console search bar. On a new project you get a **Get started** button instead of the tabs. It asks for four things in order:
+   - **App Information**: app name, and a user support email from the dropdown.
+   - **Audience**: choose **External**. Internal is only for Workspace organisations.
+   - **Contact Information**: your email address.
+   - **Finish**: agree to the Google API Services User Data Policy, then **Create**.
+4. **Publish the app.** On the **Audience** page, click **Publish app**.
+
+   Do not leave it in Testing. A Testing app expires each authorisation after 7 days, so sync would break about weekly and need re-consenting. The `drive.file` scope this app uses is **non-sensitive**, because it only reaches files the app itself created, so publishing does not trigger Google's verification review. If it ever does ask for verification, go back to Testing and add yourself under **Test users**, **Add users**, and accept the weekly re-consent.
+5. **Create the client.** Left sidebar, **Clients**, **Create client**. Application type **Web application**, name it anything. Under **Authorised JavaScript origins**, **Add URI**, and enter exactly:
 
        https://jules1342.github.io
 
-   Origins are scheme plus host only, with no path, so the `/macro/` part is left off.
-6. Copy the Client ID (it ends in `.apps.googleusercontent.com`). In the app: Settings, Google Drive sync, paste it, Save.
-7. Tap Sync to Drive. Google asks you to sign in and allow "See, edit, create and delete only the specific Google Drive files that you use with this app". That scope means the app can only touch files it created.
+   Scheme and host only. No `/macro/` path and no trailing slash. This is the most common mistake. Leave **Authorised redirect URIs** empty, because the app uses the token flow and never redirects.
+6. **Create**, then copy the **Client ID**, which ends in `.apps.googleusercontent.com`. Ignore the client secret, which is only for server-side apps. In the app: Settings, Google Drive sync, paste it, Save.
+7. Tap **Sync to Drive**. Google asks you to sign in and allow "See, edit, create and delete only the specific Google Drive files that you use with this app". That scope means the app can only touch files it created.
 
 The app keeps a folder called "Macro App" in your Drive holding one `macro.json`. Sync overwrites it with the current device state. Restore pulls it back and replaces this device's data, so a new phone can be set up from it. Sync is manual: tap it after a change worth keeping.
 
