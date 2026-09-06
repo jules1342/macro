@@ -1645,9 +1645,9 @@ function ZoomablePreview({
     onClose: () => setOpen(false)
   }));
 }
-const BUILD_VERSION = '2026-09-06i-trends-history-thumbs';
+const BUILD_VERSION = '2026-09-06k-range-tdee-smooth';
 const SMOOTH_DAYS = 14;
-const TDEE_WINDOW = 28;
+const TDEE_WINDOW = 42;
 const DIAG_KEY = 'macro_diag_error';
 const LOG_KEY = 'macro_error_log';
 const PHOTO_BEACON_KEY = 'macro_photo_beacon';
@@ -7091,11 +7091,17 @@ function WeightView({
       }
       out.push({
         date: dateStr(new Date(t)),
-        val,
-        avg: val
+        val
       });
     }
-    return out;
+    return out.map((p, i) => {
+      const win = out.slice(Math.max(0, i - (SMOOTH_DAYS - 1)), i + 1).filter(x => x.val !== null);
+      const avg = win.length >= 5 ? Math.round(win.reduce((s, x) => s + x.val, 0) / win.length) : null;
+      return {
+        ...p,
+        avg
+      };
+    });
   }, [sorted, logs]);
   const domain = useMemo(() => {
     const today = new Date();
@@ -7109,7 +7115,8 @@ function WeightView({
     const days = {
       '1m': 30,
       '3m': 90,
-      '6m': 180
+      '6m': 180,
+      '1y': 365
     }[range];
     const start = range === 'all' ? earliest : Math.max(earliest, end - days * 86400000);
     return {
@@ -7215,12 +7222,16 @@ function WeightView({
     }
   }, "Log"))), (chartData.length >= 2 || calorieSeries.filter(p => p.val !== null).length >= 2) && React.createElement("div", {
     style: {
+      position: 'sticky',
+      top: 'calc(env(safe-area-inset-top, 0px) + 8px)',
+      zIndex: 5,
       display: 'flex',
       background: C.surface,
       padding: 4,
       borderRadius: 10,
       border: `1px solid ${C.line}`,
-      marginBottom: 16
+      marginBottom: 16,
+      boxShadow: '0 4px 14px rgba(27,24,21,0.10)'
     }
   }, [{
     v: '1m',
@@ -7231,6 +7242,9 @@ function WeightView({
   }, {
     v: '6m',
     l: '6M'
+  }, {
+    v: '1y',
+    l: '1Y'
   }, {
     v: 'all',
     l: 'All'
@@ -7341,7 +7355,7 @@ function WeightView({
       marginBottom: 6,
       lineHeight: 1.45
     }
-  }, "Each point is the TDEE estimate from the ", TDEE_WINDOW, " days ending that day. A steady line means your maintenance is stable; a drift down over months is the metabolic adaptation you would expect on a cut."), React.createElement(IntakeChart, {
+  }, "Each dot is the TDEE estimate from the ", TDEE_WINDOW, " days ending that day, and the line is a ", SMOOTH_DAYS, "-day average of those dots. A steady line means your maintenance is stable; a drift down over months is the metabolic adaptation you would expect on a cut."), React.createElement(IntakeChart, {
     series: tdeeSeries,
     target: null,
     colour: C.ink,

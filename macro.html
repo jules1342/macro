@@ -1048,11 +1048,14 @@ Return ONLY a JSON object (no markdown, no preamble):
     // while the camera intent is foregrounded), the tab silently reloads.
     // We use localStorage (not sessionStorage) because a full process kill
     // can wipe sessionStorage but leaves localStorage intact.
-    const BUILD_VERSION = '2026-09-06i-trends-history-thumbs';
+    const BUILD_VERSION = '2026-09-06k-range-tdee-smooth';
     // Window for the rolling-average line on the intake charts, in days.
     const SMOOTH_DAYS = 14;
-    // Trailing window for each point on the maintenance-over-time chart.
-    const TDEE_WINDOW = 28;
+    // Trailing window for each point on the maintenance-over-time chart. 28
+    // was still spiky on real data, because a single odd weigh-in at either
+    // end of the window moves the whole estimate. Six weeks, and the drawn
+    // line is then a SMOOTH_DAYS average of those points on top.
+    const TDEE_WINDOW = 42;
     const DIAG_KEY = 'macro_diag_error';
     const LOG_KEY = 'macro_error_log';
     const PHOTO_BEACON_KEY = 'macro_photo_beacon';
@@ -4338,9 +4341,14 @@ Return ONLY a JSON object (no markdown, no preamble):
               val = Math.round(total / days - (wEnd.kg - wStart.kg) * 7700 / span);
             }
           }
-          out.push({ date: dateStr(new Date(t)), val, avg: val });
+          out.push({ date: dateStr(new Date(t)), val });
         }
-        return out;
+        // Rolling mean of the points for the drawn line; dots stay raw.
+        return out.map((p, i) => {
+          const win = out.slice(Math.max(0, i - (SMOOTH_DAYS - 1)), i + 1).filter(x => x.val !== null);
+          const avg = win.length >= 5 ? Math.round(win.reduce((s, x) => s + x.val, 0) / win.length) : null;
+          return { ...p, avg };
+        });
       }, [sorted, logs]);
 
       // Shared x-axis window for both charts, driven by the range selector.
@@ -4353,7 +4361,7 @@ Return ONLY a JSON object (no markdown, no preamble):
         const allTs = [...logTs, ...wTs].filter(t => !isNaN(t));
         let earliest = allTs.length ? Math.min(...allTs) : end - 30 * 86400000;
         earliest = Math.max(earliest, end - 730 * 86400000);
-        const days = { '1m': 30, '3m': 90, '6m': 180 }[range];
+        const days = { '1m': 30, '3m': 90, '6m': 180, '1y': 365 }[range];
         const start = (range === 'all') ? earliest : Math.max(earliest, end - days * 86400000);
         return { start, end };
       }, [range, logs, sorted]);
@@ -4396,8 +4404,14 @@ Return ONLY a JSON object (no markdown, no preamble):
           </div>
 
           {(chartData.length >= 2 || calorieSeries.filter(p => p.val !== null).length >= 2) && (
-            <div style={{ display: 'flex', background: C.surface, padding: 4, borderRadius: 10, border: `1px solid ${C.line}`, marginBottom: 16 }}>
-              {[{ v: '1m', l: '1M' }, { v: '3m', l: '3M' }, { v: '6m', l: '6M' }, { v: 'all', l: 'All' }].map(o => (
+            <div style={{
+              // Pinned while the page scrolls, so the range can be changed from
+              // any of the four charts without going back to the top.
+              position: 'sticky', top: 'calc(env(safe-area-inset-top, 0px) + 8px)', zIndex: 5,
+              display: 'flex', background: C.surface, padding: 4, borderRadius: 10, border: `1px solid ${C.line}`, marginBottom: 16,
+              boxShadow: '0 4px 14px rgba(27,24,21,0.10)'
+            }}>
+              {[{ v: '1m', l: '1M' }, { v: '3m', l: '3M' }, { v: '6m', l: '6M' }, { v: '1y', l: '1Y' }, { v: 'all', l: 'All' }].map(o => (
                 <button key={o.v} onClick={() => setRange(o.v)} style={{
                   flex: 1, border: 'none', padding: '8px 8px', borderRadius: 7,
                   background: range === o.v ? C.ink : 'transparent',
@@ -4444,7 +4458,7 @@ Return ONLY a JSON object (no markdown, no preamble):
             <div style={cardStyle}>
               <div style={mutedStyle}>Maintenance over time</div>
               <div style={{ fontSize: 12, color: C.inkSoft, marginTop: 4, marginBottom: 6, lineHeight: 1.45 }}>
-                Each point is the TDEE estimate from the {TDEE_WINDOW} days ending that day. A steady line means your maintenance is stable; a drift down over months is the metabolic adaptation you would expect on a cut.
+                Each dot is the TDEE estimate from the {TDEE_WINDOW} days ending that day, and the line is a {SMOOTH_DAYS}-day average of those dots. A steady line means your maintenance is stable; a drift down over months is the metabolic adaptation you would expect on a cut.
               </div>
               <IntakeChart series={tdeeSeries} target={null} colour={C.ink} padFloor={60}
                 domainStart={domain.start} domainEnd={domain.end}
