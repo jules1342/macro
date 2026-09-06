@@ -817,16 +817,30 @@ const driveUpload = async (token, folderId, blob, existingId) => {
   return j.id;
 };
 const driveDownloadJson = async (token, id) => (await dfetch(token, `https://www.googleapis.com/drive/v3/files/${id}?alt=media`)).json();
+const APP_ID = 'macro';
 const backupPayload = () => {
   const data = S.all();
   delete data.api_key;
   delete data.drive_client_id;
-  return data;
+  delete data.drive_connected;
+  return {
+    __app: APP_ID,
+    __schema: 1,
+    __saved: new Date().toISOString(),
+    ...data
+  };
 };
 const applyBackup = data => {
+  if (!data || typeof data !== 'object') throw new Error('That file is not a Macro backup.');
+  if (data.__app && data.__app !== APP_ID) {
+    throw new Error(`That backup belongs to another app (${data.__app}), not Macro. Nothing was changed.`);
+  }
+  const isMacroShaped = Object.keys(data).some(k => k === 'weights' || k === 'targets' || k.startsWith('log:'));
+  if (!isMacroShaped) throw new Error('That file has no Macro data in it. Nothing was changed.');
   let keys = 0;
   for (const [k, v] of Object.entries(data)) {
-    if (k === 'api_key' || k === 'drive_client_id') continue;
+    if (k.startsWith('__')) continue;
+    if (k === 'api_key' || k === 'drive_client_id' || k === 'drive_connected') continue;
     S.set(k, v);
     keys++;
   }
@@ -1592,7 +1606,7 @@ function ZoomablePreview({
     onClose: () => setOpen(false)
   }));
 }
-const BUILD_VERSION = '2026-09-06e-appdata-macros';
+const BUILD_VERSION = '2026-09-06f-app-guard';
 const SMOOTH_DAYS = 14;
 const DIAG_KEY = 'macro_diag_error';
 const LOG_KEY = 'macro_error_log';
@@ -7653,9 +7667,7 @@ function SettingsView({
   const calc = calcTargets(p);
   const maskedKey = apiKey ? apiKey.slice(0, 8) + '...' + apiKey.slice(-4) : '';
   const exportData = () => {
-    const data = S.all();
-    delete data.api_key;
-    const blob = new Blob([JSON.stringify(data, null, 2)], {
+    const blob = new Blob([JSON.stringify(backupPayload(), null, 2)], {
       type: 'application/json'
     });
     const url = URL.createObjectURL(blob);
@@ -7670,14 +7682,11 @@ function SettingsView({
     try {
       const text = await file.text();
       const data = JSON.parse(text);
-      for (const [k, v] of Object.entries(data)) {
-        if (k === 'api_key') continue;
-        S.set(k, v);
-      }
-      alert('Import complete. Reloading...');
+      const n = applyBackup(data);
+      alert(`Imported ${n} items. Reloading...`);
       window.location.reload();
     } catch (e) {
-      alert('Could not read that file. ' + e.message);
+      alert('Could not import that file. ' + e.message);
     }
   };
   return React.createElement("div", null, React.createElement(Header, {

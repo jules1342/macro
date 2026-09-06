@@ -462,16 +462,35 @@
 
     // The payload is the same shape the Export JSON button produces, so a Drive
     // file and an exported file are interchangeable.
+    // Every backup is stamped with the app it came from. The Drive queries are
+    // already scoped to App Data/Macros, so Macro cannot see another app's
+    // folder, but the apps now share one OAuth client and one parent folder, so
+    // this is the belt to that braces: a file from the wrong app is refused
+    // rather than written over the tracker.
+    const APP_ID = 'macro';
+
     const backupPayload = () => {
       const data = S.all();
-      delete data.api_key;   // never leaves the device
-      delete data.drive_client_id;
-      return data;
+      delete data.api_key;          // never leaves the device
+      delete data.drive_client_id;  // legacy key, no longer used
+      delete data.drive_connected;
+      return { __app: APP_ID, __schema: 1, __saved: new Date().toISOString(), ...data };
     };
+
     const applyBackup = (data) => {
+      if (!data || typeof data !== 'object') throw new Error('That file is not a Macro backup.');
+      // Backups made before stamping have no __app, so treat those as ours.
+      // Anything stamped for a different app is refused outright.
+      if (data.__app && data.__app !== APP_ID) {
+        throw new Error(`That backup belongs to another app (${data.__app}), not Macro. Nothing was changed.`);
+      }
+      const isMacroShaped = Object.keys(data).some(k => k === 'weights' || k === 'targets' || k.startsWith('log:'));
+      if (!isMacroShaped) throw new Error('That file has no Macro data in it. Nothing was changed.');
+
       let keys = 0;
       for (const [k, v] of Object.entries(data)) {
-        if (k === 'api_key' || k === 'drive_client_id') continue;
+        if (k.startsWith('__')) continue;                  // metadata, not state
+        if (k === 'api_key' || k === 'drive_client_id' || k === 'drive_connected') continue;
         S.set(k, v); keys++;
       }
       return keys;
@@ -973,7 +992,7 @@ Return ONLY a JSON object (no markdown, no preamble):
     // while the camera intent is foregrounded), the tab silently reloads.
     // We use localStorage (not sessionStorage) because a full process kill
     // can wipe sessionStorage but leaves localStorage intact.
-    const BUILD_VERSION = '2026-09-06e-appdata-macros';
+    const BUILD_VERSION = '2026-09-06f-app-guard';
     // Window for the rolling-average line on the intake charts, in days.
     const SMOOTH_DAYS = 14;
     const DIAG_KEY = 'macro_diag_error';
@@ -4596,9 +4615,9 @@ Return ONLY a JSON object (no markdown, no preamble):
       const maskedKey = apiKey ? apiKey.slice(0, 8) + '...' + apiKey.slice(-4) : '';
 
       const exportData = () => {
-        const data = S.all();
-        delete data.api_key; // don't include API key in backup
-        const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
+        // Same stamped payload as a Drive sync, so an exported file and a Drive
+        // file are interchangeable and both carry the app marker.
+        const blob = new Blob([JSON.stringify(backupPayload(), null, 2)], { type: 'application/json' });
         const url = URL.createObjectURL(blob);
         const a = document.createElement('a');
         a.href = url;
@@ -4612,14 +4631,12 @@ Return ONLY a JSON object (no markdown, no preamble):
         try {
           const text = await file.text();
           const data = JSON.parse(text);
-          for (const [k, v] of Object.entries(data)) {
-            if (k === 'api_key') continue;
-            S.set(k, v);
-          }
-          alert('Import complete. Reloading...');
+          // Same guard as a Drive restore: refuse another app's backup.
+          const n = applyBackup(data);
+          alert(`Imported ${n} items. Reloading...`);
           window.location.reload();
         } catch (e) {
-          alert('Could not read that file. ' + e.message);
+          alert('Could not import that file. ' + e.message);
         }
       };
 

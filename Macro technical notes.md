@@ -51,6 +51,10 @@ The catch to remember: every app must reuse THIS OAuth client ID. `drive.file` l
 
 The client ID is compiled into `macro.html` as `DRIVE_CLIENT_ID`, so there is nothing to paste on the phone: Settings shows a Connect Google Drive button and the ordinary Google account picker. Client IDs are public by design, the way every Sign in with Google app ships one in its JavaScript, and the `drive.file` scope limits the app to files it created itself. The origin restriction is what protects it, which is why the site address is fixed. Setup steps are in `README.md`.
 
+Every backup carries `__app: 'macro'`, and both the Drive restore and the file import refuse a payload stamped for a different app, or one with no Macro data in it, before writing anything. Backups made before stamping have no marker and are still accepted, so the pre-migration Netlify export can still be imported. The `__` metadata keys are never written to storage, and the API key is stripped on the way out and ignored on the way in.
+
+This guard matters because the apps share one OAuth client and one `App Data` parent. The Drive queries are already scoped to `App Data/Macros`, so Macro cannot even see another app's folder; the stamp is the second line, for a file picked by hand.
+
 The code is ported from Receipts and **has never completed a real round trip** in either app. It needs Julian's Google account and the live URL, so the first run on the phone is the real test.
 
 ## The model
