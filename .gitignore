@@ -1,0 +1,5 @@
+_build/node_modules/
+.claude/
+
+# Personal health data: real weights and calorie history. Never publish.
+import/
