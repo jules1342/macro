@@ -60,6 +60,10 @@
     }
     .animate-spin { animation: spin 1s linear infinite; }
     .view { animation: fadein 0.25s ease-out; }
+    /* Chevron on collapsible headers: points right when closed, down when open.
+       Rotation is set inline from React state, because Chrome does not animate
+       a descendant of a natively toggled <summary>. */
+    .chev { display: inline-block; width: 18px; text-align: center; color: var(--ink-soft); transition: transform 0.15s ease; transform-origin: 50% 50%; font-size: 16px; line-height: 1; }
     /* iOS PWA safe areas */
     .safe-top { padding-top: env(safe-area-inset-top, 0); }
     .safe-bottom { padding-bottom: env(safe-area-inset-bottom, 0); }
@@ -1048,7 +1052,7 @@ Return ONLY a JSON object (no markdown, no preamble):
     // while the camera intent is foregrounded), the tab silently reloads.
     // We use localStorage (not sessionStorage) because a full process kill
     // can wipe sessionStorage but leaves localStorage intact.
-    const BUILD_VERSION = '2026-09-06t-history-subtabs';
+    const BUILD_VERSION = '2026-09-06v-collapsible';
     // Window for the rolling-average line on the intake charts, in days.
     const SMOOTH_DAYS = 14;
     // Trailing window for each point on the maintenance-over-time chart. The
@@ -4550,8 +4554,8 @@ Return ONLY a JSON object (no markdown, no preamble):
                 </div>
               )}
 
-              <details style={{ marginTop: 16, paddingTop: 14, borderTop: `1px solid ${C.line}` }}>
-                <summary style={{ fontSize: 11, color: C.inkSoft, textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: 8, cursor: 'pointer', listStyle: 'none' }}>By window ▸</summary>
+              <Collapsible style={{ marginTop: 16, paddingTop: 14, borderTop: `1px solid ${C.line}` }} align="center" headerStyle={{ padding: '0 0 8px' }}
+                title={<span style={{ fontSize: 11, color: C.inkSoft, textTransform: 'uppercase', letterSpacing: '0.06em' }}>By window</span>}>
                 <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
                   {tdeeEst.windows.map((w, i) => (
                     <div key={i} style={{ display: 'grid', gridTemplateColumns: '70px 1fr auto', gap: 10, alignItems: 'baseline', fontSize: 13 }}>
@@ -4565,7 +4569,7 @@ Return ONLY a JSON object (no markdown, no preamble):
                     </div>
                   ))}
                 </div>
-              </details>
+              </Collapsible>
             </div>
           )}
 
@@ -4605,6 +4609,15 @@ Return ONLY a JSON object (no markdown, no preamble):
       // Trends, because it is a record rather than a trend).
       const [sub, setSub] = useState('macros');
       const weighIns = useMemo(() => [...weights].sort((a, b) => b.date.localeCompare(a.date)), [weights]);
+      const weightMonths = useMemo(() => {
+        const map = new Map();
+        for (const w of weighIns) { const k = w.date.slice(0, 7); if (!map.has(k)) map.set(k, []); map.get(k).push(w); }
+        return [...map.entries()].map(([key, rows]) => ({
+          key, rows,
+          label: new Date(key + '-01T00:00:00').toLocaleDateString('en-AU', { month: 'long', year: 'numeric' }),
+          avg: rows.reduce((s, w) => s + w.kg, 0) / rows.length
+        }));
+      }, [weighIns]);
       const dates = useMemo(() => Object.keys(logs).sort().reverse(), [logs]);
       // Group by month so a long history is a handful of sections, not
       // hundreds of cards mounted at once. The current month starts open.
@@ -4650,8 +4663,12 @@ Return ONLY a JSON object (no markdown, no preamble):
                 No weigh-ins yet. Log one on the Trends tab.
               </div>
             ) : (
+              weightMonths.map(m => (
+              <Collapsible key={m.key} defaultOpen={m.key === thisMonth} style={{ marginBottom: 14 }}
+                title={<span className="display" style={{ fontSize: 18, fontWeight: 500 }}>{m.label}</span>}
+                right={<span className="num" style={{ fontSize: 12, color: C.inkMuted, whiteSpace: 'nowrap' }}>{m.rows.length} weigh-in{m.rows.length === 1 ? '' : 's'} · avg {m.avg.toFixed(1)} kg</span>}>
               <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-                {weighIns.map(w => (
+                {m.rows.map(w => (
                   <div key={w.date} style={{ ...cardStyle, padding: 14, display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
                     <div>
                       <div className="num display" style={{ fontSize: 22, fontWeight: 500 }}>
@@ -4671,6 +4688,8 @@ Return ONLY a JSON object (no markdown, no preamble):
                   </div>
                 ))}
               </div>
+              </Collapsible>
+              ))
             )
           ) : (
           <div>
@@ -4680,11 +4699,9 @@ Return ONLY a JSON object (no markdown, no preamble):
             </div>
           )}
           {months.map(m => (
-          <details key={m.key} open={m.key === thisMonth} style={{ marginBottom: 14 }}>
-            <summary style={{ listStyle: 'none', cursor: 'pointer', display: 'flex', alignItems: 'baseline', justifyContent: 'space-between', padding: '6px 2px 10px' }}>
-              <span className="display" style={{ fontSize: 18, fontWeight: 500 }}>{m.label}</span>
-              <span className="num" style={{ fontSize: 12, color: C.inkMuted }}>{m.dates.length} day{m.dates.length === 1 ? '' : 's'} · avg {m.avg.toLocaleString()} kcal</span>
-            </summary>
+          <Collapsible key={m.key} defaultOpen={m.key === thisMonth} style={{ marginBottom: 14 }}
+            title={<span className="display" style={{ fontSize: 18, fontWeight: 500 }}>{m.label}</span>}
+            right={<span className="num" style={{ fontSize: 12, color: C.inkMuted, whiteSpace: 'nowrap' }}>{m.dates.length} day{m.dates.length === 1 ? '' : 's'} · avg {m.avg.toLocaleString()} kcal</span>}>
           <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
             {m.dates.map(date => {
               const entries = logs[date] || [];
@@ -4694,9 +4711,8 @@ Return ONLY a JSON object (no markdown, no preamble):
               }), { cal: 0, p: 0, c: 0, f: 0 });
               const pct = targets ? (t.cal / targets.calories) * 100 : 0;
               return (
-                <details key={date} style={cardStyle}>
-                  <summary style={{ listStyle: 'none', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-                    <div>
+                <Collapsible key={date} style={cardStyle} align="center" headerStyle={{ padding: 0 }}
+                  title={<div>
                       <div style={{ fontSize: 13, color: C.inkMuted }}>{formatDayShort(date)}</div>
                       <div className="num display" style={{ fontSize: 24, fontWeight: 500 }}>
                         {Math.round(t.cal).toLocaleString()} <span style={{ fontSize: 13, color: C.inkSoft }}>kcal</span>
@@ -4707,12 +4723,11 @@ Return ONLY a JSON object (no markdown, no preamble):
                       <div className="num" style={{ fontSize: 12, color: C.inkMuted, marginTop: 2 }}>
                         P {Math.round(t.p)}g · C {Math.round(t.c)}g · F {Math.round(t.f)}g
                       </div>
-                    </div>
-                    <div style={{ width: 80 }}>
+                    </div>}
+                  right={<div style={{ width: 80, flexShrink: 0 }}>
                       <ProgressBar value={pct} colour={pct > 110 ? C.red : C.accent}/>
                       <div className="num" style={{ fontSize: 11, color: C.inkSoft, marginTop: 4, textAlign: 'right' }}>{Math.round(pct)}%</div>
-                    </div>
-                  </summary>
+                    </div>}>
                   <div style={{ marginTop: 14, borderTop: `1px solid ${C.line}`, paddingTop: 12, display: 'flex', flexDirection: 'column', gap: 6 }}>
                     {entries.map(e => (
                       <div key={e.id} onClick={() => onEdit(e, date)} style={{
@@ -4739,11 +4754,11 @@ Return ONLY a JSON object (no markdown, no preamble):
                       </div>
                     ))}
                   </div>
-                </details>
+                </Collapsible>
               );
             })}
           </div>
-          </details>
+          </Collapsible>
           ))}
           </div>
           )}
@@ -5294,6 +5309,29 @@ Return ONLY a JSON object (no markdown, no preamble):
         <div style={{ marginBottom: 18 }}>
           <div style={{ fontSize: 12, color: C.accent, letterSpacing: '0.1em', textTransform: 'uppercase', fontWeight: 600, marginBottom: 4 }}>{pretitle}</div>
           <h1 className="display" style={{ margin: 0, fontSize: 30, fontWeight: 500, letterSpacing: '-0.025em', lineHeight: 1.1 }}>{title}</h1>
+        </div>
+      );
+    }
+
+    // Open/close section with a chevron that rotates. A button rather than a
+    // native <details>, because Chrome will not animate the chevron inside a
+    // natively toggled <summary>, and a button is better for screen readers.
+    function Collapsible({ title, right, defaultOpen = false, align = 'baseline', style, headerStyle, children }) {
+      const [open, setOpen] = useState(!!defaultOpen);
+      return (
+        <div style={style}>
+          <button onClick={() => setOpen(o => !o)} aria-expanded={open} style={{
+            width: '100%', background: 'transparent', border: 'none', padding: '6px 2px 10px',
+            display: 'flex', alignItems: align, justifyContent: 'space-between', gap: 10,
+            cursor: 'pointer', fontFamily: fonts.body, color: C.ink, textAlign: 'left', ...headerStyle
+          }}>
+            <span style={{ display: 'flex', alignItems: 'center', gap: 4, minWidth: 0 }}>
+              <span className="chev" aria-hidden="true" style={{ transform: open ? 'rotate(90deg)' : 'none' }}>›</span>
+              {title}
+            </span>
+            {right}
+          </button>
+          {open && children}
         </div>
       );
     }
