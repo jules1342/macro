@@ -1052,7 +1052,7 @@ Return ONLY a JSON object (no markdown, no preamble):
     // while the camera intent is foregrounded), the tab silently reloads.
     // We use localStorage (not sessionStorage) because a full process kill
     // can wipe sessionStorage but leaves localStorage intact.
-    const BUILD_VERSION = '2026-09-06v-collapsible';
+    const BUILD_VERSION = '2026-09-06w-weight-tab-label';
     // Window for the rolling-average line on the intake charts, in days.
     const SMOOTH_DAYS = 14;
     // Trailing window for each point on the maintenance-over-time chart. The
@@ -4648,7 +4648,7 @@ Return ONLY a JSON object (no markdown, no preamble):
         <div>
           <Header pretitle="History" title={sub === 'weight' ? 'Weigh-ins' : 'Past days'}/>
           <div style={{ display: 'flex', background: C.surface, padding: 4, borderRadius: 10, border: `1px solid ${C.line}`, marginBottom: 16 }}>
-            {[{ v: 'macros', l: 'Macros' }, { v: 'weight', l: `Weight${weighIns.length ? ` (${weighIns.length})` : ''}` }].map(o => (
+            {[{ v: 'macros', l: 'Macros' }, { v: 'weight', l: 'Weight' }].map(o => (
               <button key={o.v} onClick={() => setSub(o.v)} style={{
                 flex: 1, border: 'none', padding: '9px 8px', borderRadius: 7,
                 background: sub === o.v ? C.ink : 'transparent',

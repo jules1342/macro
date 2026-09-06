@@ -1649,7 +1649,7 @@ function ZoomablePreview({
     onClose: () => setOpen(false)
   }));
 }
-const BUILD_VERSION = '2026-09-06v-collapsible';
+const BUILD_VERSION = '2026-09-06w-weight-tab-label';
 const SMOOTH_DAYS = 14;
 const TDEE_WINDOW = 21;
 const KCAL_PER_KG = 7400;
@@ -7601,7 +7601,7 @@ function HistoryView({
     l: 'Macros'
   }, {
     v: 'weight',
-    l: `Weight${weighIns.length ? ` (${weighIns.length})` : ''}`
+    l: 'Weight'
   }].map(o => React.createElement("button", {
     key: o.v,
     onClick: () => setSub(o.v),
