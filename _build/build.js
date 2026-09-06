@@ -1,8 +1,10 @@
 const fs = require('fs');
 const path = require('path');
-// Babel has gone missing from node_modules more than once, because the parent
-// folder is a synced drive that prunes it. Rather than fail with a stack trace,
-// restore it and carry on. Deps are declared in package.json.
+// Babel resolves preset names against the working directory, not against this
+// script, so the preset is required by absolute path above and the build works
+// from any cwd. This guard is the second half: if node_modules is genuinely
+// absent, install it rather than failing with a stack trace. Deps are in
+// package.json.
 function ensureBabel() {
   try { require.resolve('@babel/preset-react'); require.resolve('@babel/core'); return; }
   catch (_) {}
@@ -27,7 +29,7 @@ const reactDom = fs.readFileSync(path.join(BUILD_DIR, 'vendor', 'react-dom.js'),
 // 1. Extract + precompile the JSX (strip Babel, no runtime transpile needed)
 const m = html.match(/<script type="text\/babel"[^>]*>([\s\S]*?)<\/script>/);
 if (!m) throw new Error('babel script block not found');
-const compiled = babel.transformSync(m[1], { presets: [['@babel/preset-react', { runtime: 'classic', development: false }]], compact: false, comments: false }).code;
+const compiled = babel.transformSync(m[1], { presets: [[require.resolve('@babel/preset-react'), { runtime: 'classic', development: false }]], compact: false, comments: false }).code;
 
 // Sanity: compiled output must be valid JS and not contain a closing-script seq
 if (/<\/script/i.test(compiled)) throw new Error('compiled code contains </script');

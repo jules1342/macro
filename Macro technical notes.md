@@ -13,7 +13,7 @@ node "_build/build.js"
 
 `build.js` inlines React from `_build/vendor/` and precompiles the JSX with the classic runtime. It uses a **function replacement, not a string replacement**, because React's minified code contains `$` sequences that corrupt a string replace. It refuses to write if the compiled output fails to parse, if an `unpkg` reference survives, or if an em dash is in the source. It prints the `BUILD_VERSION` it wrote, so the string to check in Settings, Diagnostics is visible at build time.
 
-Babel lives in `_build/node_modules/`. The synced Cowork folder has pruned it twice, so `build.js` now reinstalls it automatically when it is missing, and `_build/package.json` declares it.
+Babel lives in `_build/node_modules/`. Three "Cannot find module @babel/preset-react" failures looked like the synced folder pruning it, and were not: Babel resolves preset **names** against the working directory, so `node _build/build.js` from the project root failed while `cd _build && node build.js` worked. The preset is now required by absolute path, so the build runs from any cwd. `build.js` also reinstalls Babel if it is genuinely absent, and `_build/package.json` declares it.
 
 **Deploy is a push.** The folder is a git repo on `github.com/jules1342/macro`, and a GitHub Actions workflow publishes `app/` on every push to `main`. `_build/deploy.cmd` builds, commits and pushes in one step. The site updates about a minute later, and the phone picks it up on the next open, because the service worker fetches the page network-first.
 
@@ -47,7 +47,7 @@ Three external references remain, all deliberate:
 
 One file, `macro.json`, in a folder called "Macro App". Macro's whole state is a single localStorage object, so unlike Receipts there are no images to reconcile: sync overwrites the file, restore replaces the device. Restore sits behind a two-tap confirm. The API key and the client ID are stripped from the payload.
 
-The OAuth client ID is not a secret: client IDs are public by design, and the `drive.file` scope limits the app to files it created itself. The origin restriction is what protects it, which is why the site address is fixed. Setup steps are in `README.md`.
+The client ID is compiled into `macro.html` as `DRIVE_CLIENT_ID`, so there is nothing to paste on the phone: Settings shows a Connect Google Drive button and the ordinary Google account picker. Client IDs are public by design, the way every Sign in with Google app ships one in its JavaScript, and the `drive.file` scope limits the app to files it created itself. The origin restriction is what protects it, which is why the site address is fixed. Setup steps are in `README.md`.
 
 The code is ported from Receipts and **has never completed a real round trip** in either app. It needs Julian's Google account and the live URL, so the first run on the phone is the real test.
 

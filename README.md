@@ -53,12 +53,12 @@ Google reorganised this part of the console in 2024 and 2025. There is no longer
        https://jules1342.github.io
 
    Scheme and host only. No `/macro/` path and no trailing slash. This is the most common mistake. Leave **Authorised redirect URIs** empty, because the app uses the token flow and never redirects.
-6. **Create**, then copy the **Client ID**, which ends in `.apps.googleusercontent.com`. Ignore the client secret, which is only for server-side apps. In the app: Settings, Google Drive sync, paste it, Save.
-7. Tap **Sync to Drive**. Google asks you to sign in and allow "See, edit, create and delete only the specific Google Drive files that you use with this app". That scope means the app can only touch files it created.
+6. **Create**, then copy the **Client ID**, which ends in `.apps.googleusercontent.com`. Ignore the client secret, which is only for server-side apps. Set it as `DRIVE_CLIENT_ID` near the top of `macro.html`, then rebuild and push. It is compiled into the app, so there is nothing to paste on the phone.
+7. In the app: Settings, Google Drive sync, **Connect Google Drive**, and sign in. Then tap **Sync to Drive**. Google asks you to sign in and allow "See, edit, create and delete only the specific Google Drive files that you use with this app". That scope means the app can only touch files it created.
 
 The app keeps a folder called "Macro App" in your Drive holding one `macro.json`. Sync overwrites it with the current device state. Restore pulls it back and replaces this device's data, so a new phone can be set up from it. Sync is manual: tap it after a change worth keeping.
 
-The client ID is not a secret. OAuth client IDs are public by design, and the origin restriction is what protects them.
+The client ID is not a secret. OAuth client IDs are public by design, the way every Sign in with Google app ships one in its JavaScript, and the origin restriction is what protects them. Ours is committed to this public repo deliberately. To rotate it, delete the client in the Google Cloud console and create a new one; do not try to scrub git history.
 
 Note: the Drive code could not be exercised from the build machine, because it needs your Google account and the live site URL. Expect to report back on the first try.
 
