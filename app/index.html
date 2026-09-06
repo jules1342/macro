@@ -1645,9 +1645,10 @@ function ZoomablePreview({
     onClose: () => setOpen(false)
   }));
 }
-const BUILD_VERSION = '2026-09-06r-tdee-centred';
+const BUILD_VERSION = '2026-09-06t-history-subtabs';
 const SMOOTH_DAYS = 14;
 const TDEE_WINDOW = 21;
+const KCAL_PER_KG = 7400;
 const DIAG_KEY = 'macro_diag_error';
 const LOG_KEY = 'macro_error_log';
 const PHOTO_BEACON_KEY = 'macro_photo_beacon';
@@ -2257,7 +2258,6 @@ function App() {
       const next = idx >= 0 ? weights.map(x => x.date === w.date ? w : x) : [...weights, w];
       saveWeights(next.sort((a, b) => a.date.localeCompare(b.date)));
     },
-    onDelete: date => saveWeights(weights.filter(w => w.date !== date)),
     onApplyRecommendation: newCals => {
       const protein = targets.protein;
       const fat = Math.round(newCals * 0.3 / 9);
@@ -2277,7 +2277,8 @@ function App() {
     onEdit: (entry, date) => setEditEntry({
       entry,
       date
-    })
+    }),
+    onDeleteWeight: date => saveWeights(weights.filter(w => w.date !== date))
   }), view === 'settings' && React.createElement(SettingsView, {
     profile: profile,
     targets: targets,
@@ -6807,7 +6808,6 @@ function WeightView({
   profile,
   targets,
   onAdd,
-  onDelete,
   onApplyRecommendation
 }) {
   const [newKg, setNewKg] = useState('');
@@ -6904,7 +6904,7 @@ function WeightView({
       const endKg = avgWeightAt(lastDate.getTime()) ?? lastW.kg;
       const startKg = avgWeightAt(firstDate.getTime()) ?? firstW.kg;
       const weightChangeKg = endKg - startKg;
-      const tdee = avgIntake - weightChangeKg * 7700 / daysSpan;
+      const tdee = avgIntake - weightChangeKg * KCAL_PER_KG / daysSpan;
       const coverage = daysLogged / Math.max(1, Math.round(daysSpan));
       return {
         label: windowDays === null ? 'All data' : `${windowDays} days`,
@@ -6991,7 +6991,7 @@ function WeightView({
           }
         }
         if (days >= TDEE_WINDOW * 0.6) {
-          val = Math.round(total / days - (wEnd - wStart) * 7700 / TDEE_WINDOW);
+          val = Math.round(total / days - (wEnd - wStart) * KCAL_PER_KG / TDEE_WINDOW);
         }
       }
       out.push({
@@ -7413,7 +7413,7 @@ function WeightView({
     style: {
       marginBottom: 8
     }
-  }, "Each dot is the TDEE estimate from the ", TDEE_WINDOW, " days ending that day, using your 7-day average weight at each end of the window rather than a single weigh-in. The line is a centred ", SMOOTH_DAYS, "-day average of those dots, so it sits on them rather than behind them. This is total expenditure, exercise included, and nothing here tracks training, so a shift in the line can be a change in how much you moved rather than adaptation. A steady line means your maintenance is stable; a slow drift down on a cut, with training unchanged, is the adaptation you would expect."), React.createElement(IntakeChart, {
+  }, "Each dot is the TDEE estimate from the ", TDEE_WINDOW, " days ending that day, using your 7-day average weight at each end of the window rather than a single weigh-in. Maintenance is your average intake over the window minus the energy in the weight you gained or lost, at ", KCAL_PER_KG.toLocaleString(), " kcal per kg. The folk figure is 7,700, from a 1958 calculation that assumed pure fat loss; Hall (2008) showed that only holds above about 30 kg of body fat, because leaner people lose lean tissue too, which stores far less energy, so ", KCAL_PER_KG.toLocaleString(), " is the better blend at moderate body fat. Over a ", TDEE_WINDOW, "-day window the choice moves the estimate by about 10 kcal a day. The line is a centred ", SMOOTH_DAYS, "-day average of those dots, so it sits on them rather than behind them. This is total expenditure, exercise included, and nothing here tracks training, so a shift in the line can be a change in how much you moved rather than adaptation. A steady line means your maintenance is stable; a slow drift down on a cut, with training unchanged, is the adaptation you would expect."), React.createElement(IntakeChart, {
     series: tdeeSeries,
     target: null,
     colour: C.ink,
@@ -7521,59 +7521,17 @@ function WeightView({
     }
   }, React.createElement(InfoNote, {
     summary: "About these estimates"
-  }, "Energy balance estimates use the rough figure of 7,700 kcal per kg of body fat, which mixes fat, lean mass and water. Daily weight fluctuates with hydration, sodium, glycogen and gut contents, which is why the endpoints are 7-day averages. Trust trends of two weeks or more, not day-to-day changes. Under-logging is the most common reason TDEE estimates look wrong.")), sorted.length > 0 && React.createElement("div", null, React.createElement(SectionHeader, null, "Log"), React.createElement("div", {
-    style: {
-      display: 'flex',
-      flexDirection: 'column',
-      gap: 6
-    }
-  }, [...sorted].reverse().map(w => React.createElement("div", {
-    key: w.date,
-    style: {
-      ...cardStyle,
-      padding: 14,
-      display: 'flex',
-      alignItems: 'center',
-      justifyContent: 'space-between'
-    }
-  }, React.createElement("div", null, React.createElement("div", {
-    className: "num display",
-    style: {
-      fontSize: 22,
-      fontWeight: 500
-    }
-  }, w.kg.toFixed(1), " ", React.createElement("span", {
-    style: {
-      fontSize: 13,
-      color: C.inkSoft
-    }
-  }, "kg")), React.createElement("div", {
-    style: {
-      fontSize: 12,
-      color: C.inkMuted
-    }
-  }, formatDayShort(w.date))), React.createElement(ConfirmDelete, {
-    onConfirm: () => onDelete(w.date),
-    ariaLabel: "Delete weigh-in",
-    style: iconBtnStyle,
-    armedStyle: {
-      background: C.red,
-      borderColor: C.red,
-      color: 'white',
-      fontSize: 11,
-      fontWeight: 600
-    },
-    armedChildren: "Sure?"
-  }, React.createElement(IconTrash, {
-    size: 14
-  })))))));
+  }, "Energy balance estimates use ", KCAL_PER_KG.toLocaleString(), " kcal per kg of weight change, a blend of fat and lean tissue for moderate body fat (Hall 2008), rather than the older 7,700 figure that assumed pure fat. Daily weight fluctuates with hydration, sodium, glycogen and gut contents, which is why the endpoints are 7-day averages. Trust trends of two weeks or more, not day-to-day changes. Under-logging is the most common reason TDEE estimates look wrong.")));
 }
 function HistoryView({
   logs,
   targets,
   weights,
-  onEdit
+  onEdit,
+  onDeleteWeight
 }) {
+  const [sub, setSub] = useState('macros');
+  const weighIns = useMemo(() => [...weights].sort((a, b) => b.date.localeCompare(a.date)), [weights]);
   const dates = useMemo(() => Object.keys(logs).sort().reverse(), [logs]);
   const months = useMemo(() => {
     const map = new Map();
@@ -7605,8 +7563,88 @@ function HistoryView({
   }, [weights]);
   return React.createElement("div", null, React.createElement(Header, {
     pretitle: "History",
-    title: "Past days"
-  }), dates.length === 0 && React.createElement("div", {
+    title: sub === 'weight' ? 'Weigh-ins' : 'Past days'
+  }), React.createElement("div", {
+    style: {
+      display: 'flex',
+      background: C.surface,
+      padding: 4,
+      borderRadius: 10,
+      border: `1px solid ${C.line}`,
+      marginBottom: 16
+    }
+  }, [{
+    v: 'macros',
+    l: 'Macros'
+  }, {
+    v: 'weight',
+    l: `Weight${weighIns.length ? ` (${weighIns.length})` : ''}`
+  }].map(o => React.createElement("button", {
+    key: o.v,
+    onClick: () => setSub(o.v),
+    style: {
+      flex: 1,
+      border: 'none',
+      padding: '9px 8px',
+      borderRadius: 7,
+      background: sub === o.v ? C.ink : 'transparent',
+      color: sub === o.v ? C.bg : C.inkMuted,
+      fontWeight: sub === o.v ? 500 : 400,
+      fontSize: 13
+    }
+  }, o.l))), sub === 'weight' ? weighIns.length === 0 ? React.createElement("div", {
+    style: {
+      ...cardStyle,
+      textAlign: 'center',
+      color: C.inkMuted,
+      padding: '32px 20px'
+    }
+  }, "No weigh-ins yet. Log one on the Trends tab.") : React.createElement("div", {
+    style: {
+      display: 'flex',
+      flexDirection: 'column',
+      gap: 6
+    }
+  }, weighIns.map(w => React.createElement("div", {
+    key: w.date,
+    style: {
+      ...cardStyle,
+      padding: 14,
+      display: 'flex',
+      alignItems: 'center',
+      justifyContent: 'space-between'
+    }
+  }, React.createElement("div", null, React.createElement("div", {
+    className: "num display",
+    style: {
+      fontSize: 22,
+      fontWeight: 500
+    }
+  }, w.kg.toFixed(1), " ", React.createElement("span", {
+    style: {
+      fontSize: 13,
+      color: C.inkSoft
+    }
+  }, "kg")), React.createElement("div", {
+    style: {
+      fontSize: 12,
+      color: C.inkMuted
+    }
+  }, formatDayShort(w.date))), React.createElement(ConfirmDelete, {
+    onConfirm: () => onDeleteWeight(w.date),
+    ariaLabel: "Delete weigh-in",
+    style: iconBtnStyle,
+    armedStyle: {
+      background: C.red,
+      borderColor: C.red,
+      color: 'white',
+      fontSize: 11,
+      fontWeight: 600
+    },
+    armedChildren: "Sure?"
+  }, React.createElement(IconTrash, {
+    size: 14
+  }))))) : React.createElement("div", null, dates.length === 0 && React.createElement("div", {
     style: {
       ...cardStyle,
       textAlign: 'center',
@@ -7777,7 +7815,7 @@ function HistoryView({
         fontSize: 14
       }
     }, Math.round(e.calories))))));
-  })))));
+  }))))));
 }
 function ErrorLogCard() {
   const [log, setLog] = useState(() => {
