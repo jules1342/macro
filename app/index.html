@@ -1645,7 +1645,7 @@ function ZoomablePreview({
     onClose: () => setOpen(false)
   }));
 }
-const BUILD_VERSION = '2026-09-06n-tdee-avg-endpoints';
+const BUILD_VERSION = '2026-09-06o-tdee-note';
 const SMOOTH_DAYS = 14;
 const TDEE_WINDOW = 21;
 const DIAG_KEY = 'macro_diag_error';
@@ -7260,7 +7260,7 @@ function WeightView({
       marginBottom: 6,
       lineHeight: 1.45
     }
-  }, "Each dot is the TDEE estimate from the ", TDEE_WINDOW, " days ending that day, using your 7-day average weight at each end of the window rather than a single weigh-in. The line is a ", SMOOTH_DAYS, "-day average of those dots. A steady line means your maintenance is stable; a drift down over months is the metabolic adaptation you would expect on a cut."), React.createElement(IntakeChart, {
+  }, "Each dot is the TDEE estimate from the ", TDEE_WINDOW, " days ending that day, using your 7-day average weight at each end of the window rather than a single weigh-in. The line is a ", SMOOTH_DAYS, "-day average of those dots. This is total expenditure, exercise included, and nothing here tracks training, so a shift in the line can be a change in how much you moved rather than adaptation. A steady line means your maintenance is stable; a slow drift down on a cut, with training unchanged, is the adaptation you would expect."), React.createElement(IntakeChart, {
     series: tdeeSeries,
     target: null,
     colour: C.ink,

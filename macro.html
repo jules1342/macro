@@ -1048,7 +1048,7 @@ Return ONLY a JSON object (no markdown, no preamble):
     // while the camera intent is foregrounded), the tab silently reloads.
     // We use localStorage (not sessionStorage) because a full process kill
     // can wipe sessionStorage but leaves localStorage intact.
-    const BUILD_VERSION = '2026-09-06n-tdee-avg-endpoints';
+    const BUILD_VERSION = '2026-09-06o-tdee-note';
     // Window for the rolling-average line on the intake charts, in days.
     const SMOOTH_DAYS = 14;
     // Trailing window for each point on the maintenance-over-time chart. The
@@ -4442,7 +4442,7 @@ Return ONLY a JSON object (no markdown, no preamble):
             <div style={cardStyle}>
               <div style={mutedStyle}>Maintenance over time</div>
               <div style={{ fontSize: 12, color: C.inkSoft, marginTop: 4, marginBottom: 6, lineHeight: 1.45 }}>
-                Each dot is the TDEE estimate from the {TDEE_WINDOW} days ending that day, using your 7-day average weight at each end of the window rather than a single weigh-in. The line is a {SMOOTH_DAYS}-day average of those dots. A steady line means your maintenance is stable; a drift down over months is the metabolic adaptation you would expect on a cut.
+                Each dot is the TDEE estimate from the {TDEE_WINDOW} days ending that day, using your 7-day average weight at each end of the window rather than a single weigh-in. The line is a {SMOOTH_DAYS}-day average of those dots. This is total expenditure, exercise included, and nothing here tracks training, so a shift in the line can be a change in how much you moved rather than adaptation. A steady line means your maintenance is stable; a slow drift down on a cut, with training unchanged, is the adaptation you would expect.
               </div>
               <IntakeChart series={tdeeSeries} target={null} colour={C.ink} padFloor={60}
                 domainStart={domain.start} domainEnd={domain.end}
