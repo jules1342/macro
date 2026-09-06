@@ -1048,7 +1048,7 @@ Return ONLY a JSON object (no markdown, no preamble):
     // while the camera intent is foregrounded), the tab silently reloads.
     // We use localStorage (not sessionStorage) because a full process kill
     // can wipe sessionStorage but leaves localStorage intact.
-    const BUILD_VERSION = '2026-09-06q-tdee-chart-in-card';
+    const BUILD_VERSION = '2026-09-06r-tdee-centred';
     // Window for the rolling-average line on the intake charts, in days.
     const SMOOTH_DAYS = 14;
     // Trailing window for each point on the maintenance-over-time chart. The
@@ -4327,9 +4327,14 @@ Return ONLY a JSON object (no markdown, no preamble):
           }
           out.push({ date: dateStr(new Date(t)), val });
         }
-        // Rolling mean of the points for the drawn line; dots stay raw.
+        // CENTRED mean of the points for the drawn line, dots stay raw. A
+        // trailing mean sat about a week behind the dots, on top of the dots
+        // already being trailing 21-day estimates, so the line lagged visibly.
+        // Centred has no phase lag; it only shortens at the right edge where
+        // there is no future data yet.
+        const half = Math.floor(SMOOTH_DAYS / 2);
         return out.map((p, i) => {
-          const win = out.slice(Math.max(0, i - (SMOOTH_DAYS - 1)), i + 1).filter(x => x.val !== null);
+          const win = out.slice(Math.max(0, i - half), Math.min(out.length, i + half + 1)).filter(x => x.val !== null);
           const avg = win.length >= 5 ? Math.round(win.reduce((s, x) => s + x.val, 0) / win.length) : null;
           return { ...p, avg };
         });
@@ -4529,7 +4534,7 @@ Return ONLY a JSON object (no markdown, no preamble):
                 <div style={{ marginTop: 16, paddingTop: 14, borderTop: `1px solid ${C.line}` }}>
                   <div style={{ fontSize: 11, color: C.inkSoft, textTransform: 'uppercase', letterSpacing: '0.06em' }}>Over time</div>
                   <InfoNote summary="How this is worked out" style={{ marginBottom: 8 }}>
-                    Each dot is the TDEE estimate from the {TDEE_WINDOW} days ending that day, using your 7-day average weight at each end of the window rather than a single weigh-in. The line is a {SMOOTH_DAYS}-day average of those dots. This is total expenditure, exercise included, and nothing here tracks training, so a shift in the line can be a change in how much you moved rather than adaptation. A steady line means your maintenance is stable; a slow drift down on a cut, with training unchanged, is the adaptation you would expect.
+                    Each dot is the TDEE estimate from the {TDEE_WINDOW} days ending that day, using your 7-day average weight at each end of the window rather than a single weigh-in. The line is a centred {SMOOTH_DAYS}-day average of those dots, so it sits on them rather than behind them. This is total expenditure, exercise included, and nothing here tracks training, so a shift in the line can be a change in how much you moved rather than adaptation. A steady line means your maintenance is stable; a slow drift down on a cut, with training unchanged, is the adaptation you would expect.
                   </InfoNote>
                   <IntakeChart series={tdeeSeries} target={null} colour={C.ink} padFloor={60}
                     domainStart={domain.start} domainEnd={domain.end}

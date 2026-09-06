@@ -1645,7 +1645,7 @@ function ZoomablePreview({
     onClose: () => setOpen(false)
   }));
 }
-const BUILD_VERSION = '2026-09-06q-tdee-chart-in-card';
+const BUILD_VERSION = '2026-09-06r-tdee-centred';
 const SMOOTH_DAYS = 14;
 const TDEE_WINDOW = 21;
 const DIAG_KEY = 'macro_diag_error';
@@ -6999,8 +6999,9 @@ function WeightView({
         val
       });
     }
+    const half = Math.floor(SMOOTH_DAYS / 2);
     return out.map((p, i) => {
-      const win = out.slice(Math.max(0, i - (SMOOTH_DAYS - 1)), i + 1).filter(x => x.val !== null);
+      const win = out.slice(Math.max(0, i - half), Math.min(out.length, i + half + 1)).filter(x => x.val !== null);
       const avg = win.length >= 5 ? Math.round(win.reduce((s, x) => s + x.val, 0) / win.length) : null;
       return {
         ...p,
@@ -7412,7 +7413,7 @@ function WeightView({
     style: {
       marginBottom: 8
     }
-  }, "Each dot is the TDEE estimate from the ", TDEE_WINDOW, " days ending that day, using your 7-day average weight at each end of the window rather than a single weigh-in. The line is a ", SMOOTH_DAYS, "-day average of those dots. This is total expenditure, exercise included, and nothing here tracks training, so a shift in the line can be a change in how much you moved rather than adaptation. A steady line means your maintenance is stable; a slow drift down on a cut, with training unchanged, is the adaptation you would expect."), React.createElement(IntakeChart, {
+  }, "Each dot is the TDEE estimate from the ", TDEE_WINDOW, " days ending that day, using your 7-day average weight at each end of the window rather than a single weigh-in. The line is a centred ", SMOOTH_DAYS, "-day average of those dots, so it sits on them rather than behind them. This is total expenditure, exercise included, and nothing here tracks training, so a shift in the line can be a change in how much you moved rather than adaptation. A steady line means your maintenance is stable; a slow drift down on a cut, with training unchanged, is the adaptation you would expect."), React.createElement(IntakeChart, {
     series: tdeeSeries,
     target: null,
     colour: C.ink,
