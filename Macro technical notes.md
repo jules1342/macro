@@ -1,47 +1,55 @@
 # Macro: technical notes
 > _Location: Projects / Personal / App Development / Macro_
 
-Context that is not visible in the code, carried over from the session that built the app (31 July 2026). Read this before touching anything in Macro. Most of it was learned by trial and error and would cost real time to rediscover.
+Context that is not visible in the code. Read this before touching anything in Macro. Most of it was learned by trial and error and would cost real time to rediscover.
 
 ## Build and deploy
 
-This is the biggest gotcha.
-
-- `app/index.html` is a **built artefact, not source**. The JSX source is `macro.html` at the project root. Editing `index.html` directly is a trap. Edit the source and rebuild.
-- Rebuild with `_build/build.js`, which inlines React from `_build/vendor/` and precompiles the JSX using the classic runtime.
-- The build uses a **function replacement, not a string replacement**, because React's minified code contains `$` sequences that corrupt a string replace.
-- It refuses to write if the compiled output fails to parse, or if any `unpkg` reference survives, so a broken build fails loudly rather than shipping.
-
-**The build now runs on Julian's own machine, not in a container.** Node 24 and npm 11 are installed locally, `build.js` resolves its paths from its own location, and `_build/node_modules/` holds Babel. So the container-wipe ritual no longer applies: there is nothing to reinstall between sessions.
+`app/index.html` is a **built artefact, not source**. The JSX source is `macro.html`. Editing the built file is a trap: edit the source and rebuild.
 
 ```bash
-node "C:\Users\julia\⚡Claude Cowork\Projects\Personal\App Development\Macro\_build\build.js"
+node "_build/build.js"
 ```
 
-It prints the output path, the byte count, and the `BUILD_VERSION` it just wrote, so the string to check in Settings, Diagnostics is visible at build time.
+`build.js` inlines React from `_build/vendor/` and precompiles the JSX with the classic runtime. It uses a **function replacement, not a string replacement**, because React's minified code contains `$` sequences that corrupt a string replace. It refuses to write if the compiled output fails to parse, if an `unpkg` reference survives, or if an em dash is in the source. It prints the `BUILD_VERSION` it wrote, so the string to check in Settings, Diagnostics is visible at build time.
+
+Babel lives in `_build/node_modules/`. The synced Cowork folder has pruned it twice, so `build.js` now reinstalls it automatically when it is missing, and `_build/package.json` declares it.
+
+**Deploy is a push.** The folder is a git repo on `github.com/jules1342/macro`, and a GitHub Actions workflow publishes `app/` on every push to `main`. `_build/deploy.cmd` builds, commits and pushes in one step. The site updates about a minute later, and the phone picks it up on the next open, because the service worker fetches the page network-first.
+
+The address is fixed:
+
+    https://jules1342.github.io/macro/
+
+This replaced Netlify Drop, which minted a new URL on every drop and repeatedly left Julian several builds behind. It also matters for Drive: Google only allows sign-in from a registered origin, so **this address must never change**.
+
+## The icon
+
+`_build/icons.js` draws both sizes from scratch with zlib, no dependencies, in the app palette. Run it after any change:
+
+```bash
+node "_build/icons.js"
+```
+
+The icons are cached **cache-first** by the service worker, so a new icon will not appear until `CACHE` in `app/sw.js` is bumped. On Android the installed home-screen icon is baked in at install time, so an icon change also needs the app removed and re-added to the home screen.
 
 ## No CDN dependencies for the app itself
 
 React and the JSX transpile are inlined. Do not reintroduce a CDN for them. The white-screen incident was caused by an unpinned `@babel/standalone` flipping to Babel 8.0.1 on 18 June and breaking in-browser transpiling. Inlining is the fix.
 
-Two external references do remain, and both predate the inlining work:
+Three external references remain, all deliberate:
 
 - **Google Fonts** (Fraunces, IBM Plex Sans) via `<link>`. Degrades to the fallback stack if it fails.
-- **`heic2any@0.0.4` from jsdelivr**, loaded lazily and only when a HEIC file is picked. It is version-pinned, which is what makes it safe: the white-screen incident was caused by an *unpinned* dependency, not by a CDN as such. If it ever needs touching, keep the pin.
+- **`heic2any@0.0.4` from jsdelivr**, loaded lazily and only when a HEIC file is picked. It is version-pinned, which is what makes it safe: the June incident was an *unpinned* dependency, not a CDN as such. Keep the pin.
+- **`accounts.google.com/gsi/client`**, loaded only when Drive sync is tapped. Google will not issue a token any other way, and it is never in the boot path.
 
-## Netlify Drop and the stale URL problem
+## Google Drive sync
 
-Netlify Drop mints a new URL on every drop, and the installed home-screen icon freezes on the old URL. This repeatedly left Julian several builds behind without realising.
+One file, `macro.json`, in a folder called "Macro App". Macro's whole state is a single localStorage object, so unlike Receipts there are no images to reconcile: sync overwrites the file, restore replaces the device. Restore sits behind a two-tap confirm. The API key and the client ID are stripped from the payload.
 
-- Verify what is actually live via **Settings, Diagnostics**, which shows the running build string.
-- Claiming the Netlify site to get a stable URL would end this problem permanently.
+The OAuth client ID is not a secret: client IDs are public by design, and the `drive.file` scope limits the app to files it created itself. The origin restriction is what protects it, which is why the site address is fixed. Setup steps are in `README.md`.
 
-## Device-specific findings
-
-Pure trial and error, invisible in the code. Device is a Samsung Galaxy S22 Plus, Chrome 148, 8GB RAM, JS heap around 20MB. Memory was never the app's fault.
-
-- **The native camera (`<input capture>`) was abandoned.** Android kills the backgrounded browser process when the camera app opens, which reloads the page and loses the photo. That is why capture uses `getUserMedia`. Do not switch back.
-- **Lens 2 is the good lens on this device.** The auto-picked Lens 1 does not hold focus. The app remembers the choice in `macro_camera_device`, but first run still defaults to Lens 1. Anyone tempted to "fix" the lens heuristic needs to know Lens 2 is empirically correct here.
+The code is ported from Receipts and **has never completed a real round trip** in either app. It needs Julian's Google account and the live URL, so the first run on the phone is the real test.
 
 ## The model
 
@@ -69,9 +77,10 @@ The related fix: the TDEE intake loop stops before the final weigh-in day. `days
 
 ## State that lives on the phone, not in the repo
 
-- Julian's real history (weights, daily calories, favourites) and his Anthropic API key are in browser localStorage only. The app cannot do any analysis without his key.
+- Julian's real history (weights, daily calories, favourites) and his Anthropic API key are in browser localStorage only, tied to the site address. The app cannot do any analysis without his key.
+- **Storage does not follow a change of address.** Moving hosts strands the data on the old URL, and if that URL stops resolving the app cannot load to export it. Export first, always. This is why the GitHub Pages address is fixed.
 - The one-time import (`macro-import-step1`, `step2`, `targets.json`) is already done. Re-running it would duplicate data.
 
 ## Pre-ship checklist
 
-Before every ship: validate the parse, audit for em dashes, bump `BUILD_VERSION`.
+Before every ship: bump `BUILD_VERSION`, build (the parse and em dash checks are enforced by `build.js`), then push. Confirm the new string in Settings, Diagnostics on the phone.
