@@ -400,10 +400,8 @@ const fonts = {
   body: '"IBM Plex Sans", system-ui, sans-serif',
   num: '"Fraunces", "Times New Roman", serif'
 };
-const todayStr = () => {
-  const d = new Date();
-  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
-};
+const dateStr = d => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+const todayStr = () => dateStr(new Date());
 const formatDay = dateStr => new Date(dateStr + 'T00:00:00').toLocaleDateString('en-AU', {
   weekday: 'long',
   day: 'numeric',
@@ -450,7 +448,11 @@ const S = {
     try {
       localStorage.setItem(key, JSON.stringify(value));
     } catch (e) {
+      const isQuota = e && (e.name === 'QuotaExceededError' || e.name === 'NS_ERROR_DOM_QUOTA_REACHED' || e.code === 22 || e.code === 1014);
+      const err = new Error(isQuota ? 'Storage is full on this device.' : 'Could not save: ' + (e && e.message ? e.message : e));
+      err.kind = isQuota ? 'quota' : 'storage';
       console.error('localStorage set failed', e);
+      throw err;
     }
   },
   del: key => localStorage.removeItem(key),
@@ -818,11 +820,12 @@ const driveUpload = async (token, folderId, blob, existingId) => {
 };
 const driveDownloadJson = async (token, id) => (await dfetch(token, `https://www.googleapis.com/drive/v3/files/${id}?alt=media`)).json();
 const APP_ID = 'macro';
+const BACKUP_KEYS = ['profile', 'targets', 'weights', 'favourites', 'drive_last_sync'];
+const isBackupKey = k => BACKUP_KEYS.includes(k) || k.startsWith('log:');
 const backupPayload = () => {
-  const data = S.all();
-  delete data.api_key;
-  delete data.drive_client_id;
-  delete data.drive_connected;
+  const all = S.all();
+  const data = {};
+  for (const k of Object.keys(all)) if (isBackupKey(k)) data[k] = all[k];
   return {
     __app: APP_ID,
     __schema: 1,
@@ -839,8 +842,7 @@ const applyBackup = data => {
   if (!isMacroShaped) throw new Error('That file has no Macro data in it. Nothing was changed.');
   let keys = 0;
   for (const [k, v] of Object.entries(data)) {
-    if (k.startsWith('__')) continue;
-    if (k === 'api_key' || k === 'drive_client_id' || k === 'drive_connected') continue;
+    if (!isBackupKey(k)) continue;
     S.set(k, v);
     keys++;
   }
@@ -950,6 +952,18 @@ const callText = async (prompt, apiKey) => {
   }], apiKey, 4000);
   return parseJsonReply(text);
 };
+const normaliseItems = raw => {
+  if (!Array.isArray(raw)) return [];
+  return raw.filter(it => it && typeof it === 'object' && it.name).map(it => ({
+    name: String(it.name),
+    grams: num(it.grams) || null,
+    portionVisual: it.portion_visual ? String(it.portion_visual) : '',
+    calories: num(it.calories),
+    protein: num(it.protein_g),
+    carbs: num(it.carbs_g),
+    fat: num(it.fat_g)
+  }));
+};
 const AU_CONTEXT = `The user is in Australia. Use Australian portion conventions and food knowledge. Common Australian items to recognise when relevant: charcoal chicken (whole rotisserie chicken with skin), halal snack pack (HSP), bain-marie meals from food courts, Coles/Woolies/Aldi packaged staples, snags (sausages), pies, lamingtons, Vegemite, Tim Tams, flat whites, plunger coffee, schnitzel, parma (chicken parmigiana), barramundi, kangaroo. Use typical Australian serving sizes (e.g. a "large" charcoal chicken is a full bird ~1.2-1.4kg cooked weight, a "small" is half a bird).
 
 Australian eggs are sold by graded minimum weight per egg, in shell: small 43g, medium 49g, large 59g, extra large 68g, jumbo 78g. Edible portion is about 89% of the in-shell weight (so an extra large egg is roughly 60g of edible egg, not 50g). When the user names an egg size, use that grade's weight rather than a generic "one egg" figure. Apply the same logic to other graded or size-named produce: a "large" banana is ~136g peeled against a medium at ~118g, and a "large" avocado is ~200g of flesh against a medium at ~150g.`;
@@ -1005,12 +1019,25 @@ FORMAT FOR "portion_estimate":
 - For a composite meal with multiple visible distinct components (e.g. a smoothie with multiple ingredients, a plate with several separate items): use one ingredient per line, separated by \\n. e.g. "2 scoops protein powder\\n1 cup berries\\n1 tbsp peanut butter\\n300ml milk". Don't add bullet characters; the app adds those.
 - Prefer the multi-line ingredient format when the meal is naturally described as a recipe or list of components. Use the single-line format when it's one dish.
 
+EVERYDAY MEASURE ("portion_visual"):
+- Grams are hard to picture. Alongside them, describe the portion in a measure the user can see in their mind: cups, tablespoons, teaspoons, slices, a palm, a fist, a deck of cards, a tennis ball, a matchbox, a golf ball. e.g. "about 1 cup", "a palm-sized piece, roughly two decks of cards", "3 heaped tablespoons", "a fist of rice".
+- One short phrase. It is a visual aid, not a second measurement, so it does not have to be exact.
+
+ITEM BREAKDOWN ("items"):
+- If more than one distinct food is on the plate, list each as its own item with its own grams, everyday measure and macros. Work each item through the METHOD below on its own.
+- The top-level calories, protein, carbs and fat MUST equal the sum across items. Add them up explicitly before you answer.
+- For a single food, "items" holds just that one item.
+
 ${METHOD}
 
 Return ONLY a JSON object (no markdown fences, no preamble) with this shape:
 {
   "name": "concise dish name in Australian English",
   "portion_estimate": "single-line serving OR newline-separated ingredient list (see FORMAT above)",
+  "portion_visual": "everyday-measure phrase for the whole portion",
+  "items": [
+    { "name": "component", "grams": <integer>, "portion_visual": "everyday measure for this item", "calories": <integer>, "protein_g": <integer>, "carbs_g": <integer>, "fat_g": <integer> }
+  ],
   "calories": <integer kcal>,
   "protein_g": <integer>,
   "carbs_g": <integer>,
@@ -1121,12 +1148,24 @@ FORMAT FOR "portion_estimate":
 - For a composite meal with multiple distinct components (smoothies, bowls with separate ingredients, mixed plates): use one ingredient per line, separated by \\n. e.g. "2 scoops whey protein\\n1 cup mixed berries\\n1 tbsp peanut butter\\n300ml almond milk". Don't add bullet characters; the app adds those.
 - If the user's description itself lists ingredients, mirror that as the multi-line list. If they describe a single dish, use the single-line format.
 
+EVERYDAY MEASURE ("portion_visual"):
+- Alongside grams, describe the portion in a measure the user can picture: cups, tablespoons, teaspoons, slices, a palm, a fist, a deck of cards, a tennis ball. e.g. "about 1 cup", "a palm-sized piece", "3 heaped tablespoons". One short phrase; a visual aid, not a second measurement.
+
+ITEM BREAKDOWN ("items"):
+- If the description names more than one distinct food, list each as its own item with its own grams, everyday measure and macros, each worked through the METHOD on its own.
+- The top-level calories, protein, carbs and fat MUST equal the sum across items. Add them up explicitly.
+- For a single food, "items" holds just that one item.
+
 ${METHOD}
 
 Return ONLY a JSON object (no markdown, no preamble):
 {
   "name": "concise dish name in Australian English",
   "portion_estimate": "single-line serving OR newline-separated ingredient list (see FORMAT above)",
+  "portion_visual": "everyday-measure phrase for the whole portion",
+  "items": [
+    { "name": "component", "grams": <integer>, "portion_visual": "everyday measure for this item", "calories": <integer>, "protein_g": <integer>, "carbs_g": <integer>, "fat_g": <integer> }
+  ],
   "calories": <integer kcal>,
   "protein_g": <integer>,
   "carbs_g": <integer>,
@@ -1606,7 +1645,7 @@ function ZoomablePreview({
     onClose: () => setOpen(false)
   }));
 }
-const BUILD_VERSION = '2026-09-06g-icon-cachebust';
+const BUILD_VERSION = '2026-09-06h-items-measures-safety';
 const SMOOTH_DAYS = 14;
 const DIAG_KEY = 'macro_diag_error';
 const LOG_KEY = 'macro_error_log';
@@ -1959,6 +1998,8 @@ function App() {
   const recoveryFileRef = useRef(null);
   const recoveryTabRef = useRef('photo');
   const [editEntry, setEditEntry] = useState(null);
+  const [viewDate, setViewDate] = useState(todayStr());
+  const [addInitialSaved, setAddInitialSaved] = useState(null);
   const [profile, setProfile] = useState(null);
   const [targets, setTargets] = useState(null);
   const [weights, setWeights] = useState([]);
@@ -2010,20 +2051,40 @@ function App() {
     S.set('favourites', f);
   };
   const saveLog = (date, entries) => {
-    const next = {
-      ...logs,
-      [date]: entries
-    };
-    setLogs(next);
     if (entries.length === 0) {
       const copy = {
-        ...next
+        ...logs
       };
       delete copy[date];
       setLogs(copy);
       S.del('log:' + date);
-    } else {
+      return;
+    }
+    try {
       S.set('log:' + date, entries);
+      setLogs({
+        ...logs,
+        [date]: entries
+      });
+    } catch (e) {
+      if (e.kind !== 'quota') {
+        alert(e.message);
+        return;
+      }
+      const stripped = entries.map(({
+        imageData,
+        ...rest
+      }) => rest);
+      try {
+        S.set('log:' + date, stripped);
+        setLogs({
+          ...logs,
+          [date]: stripped
+        });
+        alert('Storage is nearly full, so this day was saved without its photos. Export a backup and clear old history to free space.');
+      } catch (e2) {
+        alert('Storage is full and the entry could not be saved. Export a backup, then clear some history.');
+      }
     }
   };
   const addEntry = entry => {
@@ -2087,6 +2148,8 @@ function App() {
         fat: entry.fat,
         imageData: entry.imageData,
         labelData: entry.labelData,
+        portionVisual: entry.portionVisual,
+        items: entry.items,
         source: entry.source
       };
       saveFavourites([fav, ...favourites]);
@@ -2107,6 +2170,8 @@ function App() {
       fat: fav.fat,
       imageData: fav.imageData,
       labelData: fav.labelData,
+      portionVisual: fav.portionVisual,
+      items: fav.items,
       source: fav.source
     };
     const idx = favourites.findIndex(f => f.id === clean.id);
@@ -2120,7 +2185,13 @@ function App() {
     return clean.id;
   };
   const today = todayStr();
-  const todayLog = logs[today] || [];
+  const todayLog = logs[viewDate] || [];
+  const shiftDay = n => {
+    const d = new Date(viewDate + 'T00:00:00');
+    d.setDate(d.getDate() + n);
+    const next = dateStr(d);
+    if (next <= today) setViewDate(next);
+  };
   const totals = useMemo(() => todayLog.reduce((a, e) => ({
     cal: a.cal + num(e.calories),
     p: a.p + num(e.protein),
@@ -2164,10 +2235,26 @@ function App() {
     targets: targets,
     totals: totals,
     log: todayLog,
-    onDelete: id => deleteEntry(today, id),
+    date: viewDate,
+    isToday: viewDate === today,
+    onPrev: () => shiftDay(-1),
+    onNext: () => shiftDay(1),
+    onToday: () => setViewDate(today),
+    favourites: favourites,
+    onPickFavourite: fav => {
+      setAddInitialSaved(fav);
+      setAddInitialTab('saved');
+      setAddOpen(true);
+    },
+    onOpenSaved: () => {
+      setAddInitialSaved(null);
+      setAddInitialTab('saved');
+      setAddOpen(true);
+    },
+    onDelete: id => deleteEntry(viewDate, id),
     onEdit: entry => setEditEntry({
       entry,
-      date: today
+      date: viewDate
     }),
     isFavourite: isFavourite,
     onToggleFavourite: toggleFavourite
@@ -2217,6 +2304,7 @@ function App() {
     view: view,
     setView: setView,
     onAdd: () => {
+      setAddInitialSaved(null);
       setAddInitialTab('photo');
       setAddOpen(true);
     }
@@ -2249,14 +2337,18 @@ function App() {
     logs: logs,
     initialTab: addInitialTab,
     initialFile: addInitialFile,
+    initialSaved: addInitialSaved,
+    initialDate: view === 'today' ? viewDate : today,
     onClose: () => {
       setAddOpen(false);
       setAddInitialFile(null);
+      setAddInitialSaved(null);
     },
     onSave: entry => {
       addEntry(entry);
       setAddOpen(false);
       setAddInitialFile(null);
+      setAddInitialSaved(null);
     },
     onSetApiKey: k => saveApiKey(k),
     onRemoveFavourite: id => saveFavourites(favourites.filter(f => f.id !== id)),
@@ -2477,6 +2569,14 @@ function TodayView({
   targets,
   totals,
   log,
+  date,
+  isToday,
+  onPrev,
+  onNext,
+  onToday,
+  favourites,
+  onPickFavourite,
+  onOpenSaved,
   onDelete,
   onEdit,
   isFavourite,
@@ -2492,11 +2592,66 @@ function TodayView({
   const remaining = t.calories - totals.cal;
   const hour = new Date().getHours();
   const greet = hour < 12 ? 'Good morning' : hour < 18 ? 'Good afternoon' : 'Good evening';
-  const pretitle = profile?.name ? `${greet}, ${profile.name}` : 'Today';
-  return React.createElement("div", null, React.createElement(Header, {
-    pretitle: pretitle,
-    title: formatDay(todayStr())
-  }), React.createElement("div", {
+  const pretitle = isToday ? profile?.name ? `${greet}, ${profile.name}` : 'Today' : 'Looking back';
+  const navBtn = {
+    ...iconBtnStyle,
+    width: 34,
+    height: 34,
+    flexShrink: 0
+  };
+  return React.createElement("div", null, React.createElement("div", {
+    style: {
+      display: 'flex',
+      alignItems: 'flex-end',
+      gap: 10,
+      marginBottom: 18
+    }
+  }, React.createElement("div", {
+    style: {
+      flex: 1,
+      minWidth: 0
+    }
+  }, React.createElement("div", {
+    style: {
+      fontSize: 12,
+      color: C.accent,
+      letterSpacing: '0.1em',
+      textTransform: 'uppercase',
+      fontWeight: 600,
+      marginBottom: 4
+    }
+  }, pretitle), React.createElement("h1", {
+    className: "display",
+    style: {
+      margin: 0,
+      fontSize: 28,
+      fontWeight: 500,
+      letterSpacing: '-0.025em',
+      lineHeight: 1.1
+    }
+  }, formatDay(date))), !isToday && React.createElement("button", {
+    onClick: onToday,
+    style: {
+      ...navBtn,
+      width: 'auto',
+      padding: '0 12px',
+      fontSize: 12,
+      fontWeight: 600,
+      color: C.accent
+    }
+  }, "Today"), React.createElement("button", {
+    onClick: onPrev,
+    style: navBtn,
+    "aria-label": "Previous day"
+  }, "‹"), React.createElement("button", {
+    onClick: onNext,
+    disabled: isToday,
+    style: {
+      ...navBtn,
+      opacity: isToday ? 0.3 : 1
+    },
+    "aria-label": "Next day"
+  }, "›")), React.createElement("div", {
     style: cardStyle
   }, React.createElement("div", {
     style: {
@@ -2562,7 +2717,77 @@ function TodayView({
     value: totals.f,
     target: t.fat,
     colour: "#8E5A8A"
-  }))), React.createElement(SectionHeader, null, "Today's food"), log.length === 0 ? React.createElement("div", {
+  }))), favourites && favourites.length > 0 && React.createElement("div", null, React.createElement("div", {
+    style: {
+      display: 'flex',
+      alignItems: 'baseline',
+      justifyContent: 'space-between'
+    }
+  }, React.createElement(SectionHeader, null, "Saved meals"), React.createElement("button", {
+    onClick: onOpenSaved,
+    style: {
+      background: 'transparent',
+      border: 'none',
+      color: C.accent,
+      fontSize: 12,
+      fontWeight: 600,
+      padding: 0
+    }
+  }, "More")), React.createElement("div", {
+    style: {
+      display: 'flex',
+      flexDirection: 'column',
+      gap: 6,
+      marginBottom: 18
+    }
+  }, favourites.slice(0, 4).map(f => React.createElement("button", {
+    key: f.id,
+    onClick: () => onPickFavourite(f),
+    style: {
+      background: C.surface,
+      border: `1px solid ${C.line}`,
+      borderRadius: 12,
+      padding: '10px 12px',
+      display: 'flex',
+      alignItems: 'center',
+      gap: 10,
+      textAlign: 'left',
+      width: '100%'
+    }
+  }, React.createElement("span", {
+    style: {
+      color: C.accent,
+      fontSize: 13
+    }
+  }, "★"), React.createElement("span", {
+    style: {
+      flex: 1,
+      minWidth: 0,
+      fontSize: 14,
+      fontWeight: 500,
+      overflow: 'hidden',
+      textOverflow: 'ellipsis',
+      whiteSpace: 'nowrap'
+    }
+  }, f.name), React.createElement("span", {
+    className: "num",
+    style: {
+      fontSize: 12,
+      color: C.inkMuted,
+      whiteSpace: 'nowrap'
+    }
+  }, Math.round(f.calories), " kcal · P ", Math.round(f.protein)), React.createElement("span", {
+    style: {
+      ...iconBtnStyle,
+      width: 26,
+      height: 26,
+      background: C.accent,
+      color: 'white',
+      border: 'none'
+    }
+  }, React.createElement(IconPlus, {
+    size: 13
+  })))))), React.createElement(SectionHeader, null, isToday ? "Today's food" : 'Food that day'), log.length === 0 ? React.createElement("div", {
     style: {
       ...cardStyle,
       textAlign: 'center',
@@ -2831,7 +3056,14 @@ function FoodRow({
       overflowWrap: 'anywhere',
       lineHeight: 1.4
     }
-  }, lines[0])), React.createElement("div", {
+  }, lines[0])), entry.portionVisual && React.createElement("div", {
+    style: {
+      fontSize: 12,
+      color: C.inkMuted,
+      marginTop: 2,
+      marginBottom: 2
+    }
+  }, "About ", entry.portionVisual), React.createElement("div", {
     className: "num display",
     style: {
       fontSize: 20,
@@ -2883,10 +3115,12 @@ function AddSheet({
   onRemoveFavourite,
   onUpsertFavourite,
   initialTab,
-  initialFile
+  initialFile,
+  initialSaved,
+  initialDate
 }) {
   const [tab, setTab] = useState(initialTab || 'photo');
-  const [logDate, setLogDate] = useState(todayStr());
+  const [logDate, setLogDate] = useState(initialDate || todayStr());
   const wrappedSave = entry => onSave({
     ...entry,
     date: logDate
@@ -3044,7 +3278,8 @@ function AddSheet({
     favourites: favourites,
     logs: logs,
     onRemoveFavourite: onRemoveFavourite,
-    onUpsertFavourite: onUpsertFavourite
+    onUpsertFavourite: onUpsertFavourite,
+    initialSaved: initialSaved
   })));
 }
 function SavedTab({
@@ -3054,9 +3289,11 @@ function SavedTab({
   favourites,
   logs,
   onRemoveFavourite,
-  onUpsertFavourite
+  onUpsertFavourite,
+  initialSaved
 }) {
-  const [selected, setSelected] = useState(null);
+  const [selected, setSelected] = useState(initialSaved || null);
+  const [sub, setSub] = useState(favourites.length ? 'fav' : 'recent');
   const recent = useMemo(() => {
     const cutoff = new Date();
     cutoff.setDate(cutoff.getDate() - 60);
@@ -3133,40 +3370,56 @@ function SavedTab({
       }
     }, "Tap the star on a logged item to favourite it, or log a few meals. Recent items appear here automatically."));
   }
-  return React.createElement("div", null, favourites.length > 0 && React.createElement("div", null, React.createElement("div", {
-    style: {
-      ...mutedStyle,
-      marginBottom: 8
-    }
-  }, "★ Favourites"), React.createElement("div", {
+  const list = sub === 'fav' ? favourites : recent;
+  return React.createElement("div", null, React.createElement("div", {
     style: {
       display: 'flex',
-      flexDirection: 'column',
-      gap: 6,
-      marginBottom: 18
+      background: C.surface,
+      padding: 4,
+      borderRadius: 10,
+      border: `1px solid ${C.line}`,
+      marginBottom: 12
     }
-  }, favourites.map(f => React.createElement(SavedRow, {
-    key: f.id,
-    item: f,
-    isFav: true,
-    onPick: () => setSelected(f),
-    onRemove: () => onRemoveFavourite(f.id)
-  })))), recent.length > 0 && React.createElement("div", null, React.createElement("div", {
+  }, [{
+    v: 'fav',
+    l: `★ Favourites${favourites.length ? ` (${favourites.length})` : ''}`
+  }, {
+    v: 'recent',
+    l: `Recent${recent.length ? ` (${recent.length})` : ''}`
+  }].map(o => React.createElement("button", {
+    key: o.v,
+    onClick: () => setSub(o.v),
     style: {
-      ...mutedStyle,
-      marginBottom: 8
+      flex: 1,
+      border: 'none',
+      padding: '9px 8px',
+      borderRadius: 7,
+      background: sub === o.v ? C.ink : 'transparent',
+      color: sub === o.v ? C.bg : C.inkMuted,
+      fontWeight: sub === o.v ? 500 : 400,
+      fontSize: 13
     }
-  }, "Recent"), React.createElement("div", {
+  }, o.l))), list.length === 0 ? React.createElement("div", {
+    style: {
+      ...cardStyle,
+      textAlign: 'center',
+      color: C.inkSoft,
+      fontSize: 13,
+      padding: '24px 20px'
+    }
+  }, sub === 'fav' ? 'No favourites yet. Tap the star on a logged item to add one.' : 'Nothing logged in the last 60 days.') : React.createElement("div", {
     style: {
       display: 'flex',
       flexDirection: 'column',
       gap: 6
     }
-  }, recent.map((r, i) => React.createElement(SavedRow, {
-    key: r.id || i,
-    item: r,
-    onPick: () => setSelected(r)
-  })))));
+  }, list.map((f, i) => React.createElement(SavedRow, {
+    key: f.id || i,
+    item: f,
+    isFav: sub === 'fav',
+    onPick: () => setSelected(f),
+    onRemove: sub === 'fav' ? () => onRemoveFavourite(f.id) : undefined
+  }))));
 }
 function SavedRow({
   item,
@@ -3711,6 +3964,8 @@ const recalcMacrosForEntry = async (entry, apiKey) => {
     ...entry,
     name: entry.name,
     portion: r.portion_estimate || entry.portion,
+    portionVisual: r.portion_visual || entry.portionVisual || '',
+    items: Array.isArray(r.items) && r.items.length ? normaliseItems(r.items) : entry.items || [],
     calories: num(r.calories, entry.calories),
     protein: num(r.protein_g, entry.protein),
     carbs: num(r.carbs_g, entry.carbs),
@@ -3753,6 +4008,7 @@ Return ONLY a JSON object (no markdown, no preamble):
 {
   "name": "updated concise name in Australian English",
   "portion_estimate": "updated portion description (single line, or newline-separated ingredients if it's a list)",
+  "portion_visual": "updated everyday-measure phrase, e.g. 'about 1 cup' or 'a palm-sized piece'",
   "calories": <integer kcal>,
   "protein_g": <integer>,
   "carbs_g": <integer>,
@@ -3762,6 +4018,7 @@ Return ONLY a JSON object (no markdown, no preamble):
   return {
     name: r.name || entry.name,
     portion: r.portion_estimate || entry.portion,
+    portionVisual: r.portion_visual || entry.portionVisual || '',
     calories: num(r.calories, entry.calories),
     protein: num(r.protein_g, entry.protein),
     carbs: num(r.carbs_g, entry.carbs),
@@ -4778,6 +5035,8 @@ function PhotoTab({
         setResult({
           name: r.name || 'Food',
           portion: r.portion_estimate || '',
+          portionVisual: r.portion_visual || '',
+          items: normaliseItems(r.items),
           calories: num(r.calories),
           protein: num(r.protein_g),
           carbs: num(r.carbs_g),
@@ -5284,6 +5543,8 @@ function ManualTab({
       setResult({
         name: r.name || description,
         portion: r.portion_estimate || '',
+        portionVisual: r.portion_visual || '',
+        items: normaliseItems(r.items),
         calories: num(r.calories),
         protein: num(r.protein_g),
         carbs: num(r.carbs_g),
@@ -5635,13 +5896,29 @@ function EditableResult({
   saveLabel,
   saving
 }) {
-  return React.createElement("div", null, React.createElement("div", {
+  const saveBtn = React.createElement("button", {
+    onClick: onSave,
+    disabled: saving,
+    style: {
+      ...primaryBtn,
+      marginTop: 0,
+      marginBottom: 12,
+      opacity: saving ? 0.6 : 1,
+      display: 'flex',
+      alignItems: 'center',
+      justifyContent: 'center',
+      gap: 8
+    }
+  }, saving && React.createElement(IconLoader, {
+    size: 16
+  }), saveLabel || 'Add to today');
+  return React.createElement("div", null, saveBtn, React.createElement("div", {
     style: {
       background: C.surface,
       border: `1px solid ${C.line}`,
       borderRadius: 12,
-      padding: 18,
-      marginBottom: 16
+      padding: 16,
+      marginBottom: 12
     }
   }, React.createElement("input", {
     value: result.name,
@@ -5683,7 +5960,76 @@ function EditableResult({
       padding: 0,
       boxSizing: 'border-box'
     }
-  }), meta, React.createElement("div", {
+  }), result.portionVisual && React.createElement("div", {
+    style: {
+      fontSize: 13,
+      color: C.inkMuted,
+      marginTop: 6,
+      display: 'flex',
+      alignItems: 'baseline',
+      gap: 6
+    }
+  }, React.createElement("span", {
+    style: {
+      color: C.inkSoft
+    }
+  }, "About"), React.createElement("span", {
+    style: {
+      color: C.ink
+    }
+  }, result.portionVisual)), meta, result.items && result.items.length > 1 && React.createElement("div", {
+    style: {
+      marginTop: 10,
+      borderTop: `1px solid ${C.line}`,
+      paddingTop: 10
+    }
+  }, React.createElement("div", {
+    style: {
+      fontSize: 11,
+      color: C.inkSoft,
+      textTransform: 'uppercase',
+      letterSpacing: '0.06em',
+      marginBottom: 6
+    }
+  }, "On the plate"), React.createElement("div", {
+    style: {
+      display: 'flex',
+      flexDirection: 'column',
+      gap: 6
+    }
+  }, result.items.map((it, i) => React.createElement("div", {
+    key: i,
+    style: {
+      display: 'flex',
+      alignItems: 'baseline',
+      gap: 8,
+      fontSize: 13
+    }
+  }, React.createElement("div", {
+    style: {
+      flex: 1,
+      minWidth: 0
+    }
+  }, React.createElement("span", {
+    style: {
+      color: C.ink
+    }
+  }, it.name), React.createElement("span", {
+    style: {
+      color: C.inkSoft
+    }
+  }, it.grams ? ` · ${it.grams}g` : '', it.portionVisual ? ` · ${it.portionVisual}` : '')), React.createElement("div", {
+    className: "num",
+    style: {
+      color: C.inkMuted,
+      whiteSpace: 'nowrap',
+      fontSize: 12
+    }
+  }, React.createElement("b", {
+    style: {
+      color: C.ink
+    }
+  }, Math.round(it.calories)), " · P ", Math.round(it.protein), " · C ", Math.round(it.carbs), " · F ", Math.round(it.fat)))))), React.createElement("div", {
     style: {
       marginTop: 12,
       paddingTop: 14,
@@ -5730,20 +6076,7 @@ function EditableResult({
       fat: v
     }),
     suffix: "g"
-  }))), React.createElement("button", {
-    onClick: onSave,
-    disabled: saving,
-    style: {
-      ...primaryBtn,
-      opacity: saving ? 0.6 : 1,
-      display: 'flex',
-      alignItems: 'center',
-      justifyContent: 'center',
-      gap: 8
-    }
-  }, saving && React.createElement(IconLoader, {
-    size: 16
-  }), saveLabel || 'Add to today'));
+  }))));
 }
 function NumEdit({
   label,
