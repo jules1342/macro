@@ -1048,14 +1048,15 @@ Return ONLY a JSON object (no markdown, no preamble):
     // while the camera intent is foregrounded), the tab silently reloads.
     // We use localStorage (not sessionStorage) because a full process kill
     // can wipe sessionStorage but leaves localStorage intact.
-    const BUILD_VERSION = '2026-09-06m-no-today-saved';
+    const BUILD_VERSION = '2026-09-06n-tdee-avg-endpoints';
     // Window for the rolling-average line on the intake charts, in days.
     const SMOOTH_DAYS = 14;
-    // Trailing window for each point on the maintenance-over-time chart. 28
-    // was still spiky on real data, because a single odd weigh-in at either
-    // end of the window moves the whole estimate. Six weeks, and the drawn
-    // line is then a SMOOTH_DAYS average of those points on top.
-    const TDEE_WINDOW = 42;
+    // Trailing window for each point on the maintenance-over-time chart. The
+    // weight at each end of the window is a 7-day average, not one weigh-in,
+    // which is what removes most of the noise; that is what lets the window be
+    // three weeks rather than six. The drawn line is a SMOOTH_DAYS average of
+    // the points on top of that.
+    const TDEE_WINDOW = 21;
     const DIAG_KEY = 'macro_diag_error';
     const LOG_KEY = 'macro_error_log';
     const PHOTO_BEACON_KEY = 'macro_photo_beacon';
@@ -4119,6 +4120,16 @@ Return ONLY a JSON object (no markdown, no preamble):
 
       const sorted = useMemo(() => [...weights].sort((a, b) => a.date.localeCompare(b.date)), [weights]);
 
+      // Weight at a moment, as the 7-day trailing average of weigh-ins ending
+      // there: the same average the weight chart draws. Needs two or more
+      // weigh-ins in that week, else null, because a single reading is too
+      // noisy to anchor an energy-balance window.
+      const avgWeightAt = (ts) => {
+        const pts = sorted.filter(w => { const wt = new Date(w.date + 'T00:00:00').getTime(); return wt <= ts && wt > ts - 7 * 86400000; });
+        if (pts.length < 2) return null;
+        return pts.reduce((s, w) => s + w.kg, 0) / pts.length;
+      };
+
       const chartData = useMemo(() => {
         if (sorted.length === 0) return [];
         const tsOfW = (x) => new Date(x.date + 'T00:00:00').getTime();
@@ -4207,7 +4218,11 @@ Return ONLY a JSON object (no markdown, no preamble):
 
           if (daysLogged < 5) return null;
           const avgIntake = totalCal / daysLogged;
-          const weightChangeKg = lastW.kg - firstW.kg;
+          // Averaged endpoints, falling back to the single reading only when a
+          // week has too few weigh-ins to average.
+          const endKg = avgWeightAt(lastDate.getTime()) ?? lastW.kg;
+          const startKg = avgWeightAt(firstDate.getTime()) ?? firstW.kg;
+          const weightChangeKg = endKg - startKg;
           const tdee = avgIntake - (weightChangeKg * 7700 / daysSpan);
           const coverage = daysLogged / Math.max(1, Math.round(daysSpan));
 
@@ -4292,27 +4307,22 @@ Return ONLY a JSON object (no markdown, no preamble):
       const tdeeSeries = useMemo(() => {
         if (sorted.length < 2) return [];
         const tsOfW = (w) => new Date(w.date + 'T00:00:00').getTime();
-        const nearest = (ts) => {
-          let best = null, bestD = Infinity;
-          for (const w of sorted) { const d = Math.abs(tsOfW(w) - ts); if (d < bestD) { bestD = d; best = w; } }
-          return bestD <= 3 * 86400000 ? best : null;
-        };
         const today = new Date(); today.setHours(0, 0, 0, 0);
         const first = tsOfW(sorted[0]);
         const out = [];
-        for (let t = first + TDEE_WINDOW * 86400000; t <= today.getTime(); t += 86400000) {
-          const wEnd = nearest(t), wStart = nearest(t - TDEE_WINDOW * 86400000);
+        // Start once a full window plus the averaging week fits in the data.
+        for (let t = first + (TDEE_WINDOW + 6) * 86400000; t <= today.getTime(); t += 86400000) {
+          const wEnd = avgWeightAt(t), wStart = avgWeightAt(t - TDEE_WINDOW * 86400000);
           let val = null;
-          if (wEnd && wStart && wEnd.date > wStart.date) {
-            const a = new Date(wStart.date + 'T00:00:00'), b = new Date(wEnd.date + 'T00:00:00');
-            const span = (b - a) / 86400000;
+          if (wEnd !== null && wStart !== null) {
+            const a = new Date(t - TDEE_WINDOW * 86400000), b = new Date(t);
             let total = 0, days = 0;
             for (const d = new Date(a); d < b; d.setDate(d.getDate() + 1)) {
               const cal = (logs[dateStr(d)] || []).reduce((s, e) => s + num(e.calories), 0);
               if (cal > 0) { total += cal; days++; }
             }
-            if (span >= 10 && days >= span * 0.6) {
-              val = Math.round(total / days - (wEnd.kg - wStart.kg) * 7700 / span);
+            if (days >= TDEE_WINDOW * 0.6) {
+              val = Math.round(total / days - (wEnd - wStart) * 7700 / TDEE_WINDOW);
             }
           }
           out.push({ date: dateStr(new Date(t)), val });
@@ -4432,7 +4442,7 @@ Return ONLY a JSON object (no markdown, no preamble):
             <div style={cardStyle}>
               <div style={mutedStyle}>Maintenance over time</div>
               <div style={{ fontSize: 12, color: C.inkSoft, marginTop: 4, marginBottom: 6, lineHeight: 1.45 }}>
-                Each dot is the TDEE estimate from the {TDEE_WINDOW} days ending that day, and the line is a {SMOOTH_DAYS}-day average of those dots. A steady line means your maintenance is stable; a drift down over months is the metabolic adaptation you would expect on a cut.
+                Each dot is the TDEE estimate from the {TDEE_WINDOW} days ending that day, using your 7-day average weight at each end of the window rather than a single weigh-in. The line is a {SMOOTH_DAYS}-day average of those dots. A steady line means your maintenance is stable; a drift down over months is the metabolic adaptation you would expect on a cut.
               </div>
               <IntakeChart series={tdeeSeries} target={null} colour={C.ink} padFloor={60}
                 domainStart={domain.start} domainEnd={domain.end}

@@ -77,7 +77,9 @@ The related fix: the TDEE intake loop stops before the final weigh-in day. `days
 
 ## Maintenance over time
 
-`tdeeSeries` in the Trends view. For each day, take the weigh-in nearest that day and the one nearest `TDEE_WINDOW` (28) days earlier, each within 3 days; sum the food logged between them; require at least 60% of those days logged; then the same energy-balance sum as the headline figure. Days that fail any of that are `null` and the chart line breaks there. The chart reuses `IntakeChart` with `avg` set equal to `val`, so there is no second smoothing pass on top of the window.
+`tdeeSeries` in the Trends view. For each day, `avgWeightAt` gives the 7-day trailing average weight at that day and at `TDEE_WINDOW` (21) days earlier, each needing two or more weigh-ins in its week; sum the food logged across the window; require at least 60% of those days logged; then `avgIntake - dKg * 7700 / 21`. Days that fail any of that are `null` and the line breaks there. The drawn line is a further `SMOOTH_DAYS` (14) average of the dots. The headline TDEE windows use the same `avgWeightAt` for their endpoints, falling back to the single reading only when a week is too sparse to average, so the chart and the headline are built from the same weights.
+
+The 7,700 is kcal per kilogram of body fat: adipose tissue is about 87% lipid at 9 kcal per gram, which is the same constant as the old "3,500 kcal per pound" rule. It is a convention with a known flaw, since weight change is never purely fat, and the app's own note under the TDEE card says so.
 
 ## Dates
 
