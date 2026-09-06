@@ -361,7 +361,15 @@
     // it is useless anywhere else. To rotate it, delete the client in the Google
     // Cloud console and create a new one; do not try to scrub it from git.
     const DRIVE_CLIENT_ID = '662075205003-gfgqm2s951u7hfnne86ok12trlvfdjom.apps.googleusercontent.com';
-    const DRIVE_FOLDER = 'Macro App';
+    // Drive layout, the standing convention for Julian's apps: one top-level
+    // folder per app, with an "App Data" folder inside it.
+    //
+    // Deliberately NOT a shared "App Data" parent holding one folder per app.
+    // The drive.file scope only lets an app see files it created itself, so a
+    // second app would be blind to this folder and would quietly create its own
+    // duplicate alongside it. A per-app top folder has no such collision.
+    const DRIVE_PATH = ['Macros', 'App Data'];
+    const DRIVE_FOLDER = DRIVE_PATH.join(' / ');
     const DRIVE_FILE = 'macro.json';
     const gis = { token: null, exp: 0, client: null };
 
@@ -410,15 +418,24 @@
       return r;
     };
 
+    // Walks DRIVE_PATH from the Drive root, creating any folder that is missing,
+    // and returns the id of the last one. Escapes apostrophes because folder
+    // names go into a Drive query string.
     const driveFolder = async (token) => {
-      const q = encodeURIComponent(`name='${DRIVE_FOLDER}' and mimeType='application/vnd.google-apps.folder' and trashed=false`);
-      const j = await (await dfetch(token, `https://www.googleapis.com/drive/v3/files?q=${q}&fields=files(id,name)`)).json();
-      if (j.files && j.files.length) return j.files[0].id;
-      const c = await (await dfetch(token, 'https://www.googleapis.com/drive/v3/files', {
-        method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ name: DRIVE_FOLDER, mimeType: 'application/vnd.google-apps.folder' })
-      })).json();
-      return c.id;
+      const esc = (s) => s.replace(/'/g, "\\'");
+      let parent = 'root';
+      for (const name of DRIVE_PATH) {
+        const q = encodeURIComponent(
+          `name='${esc(name)}' and mimeType='application/vnd.google-apps.folder' and '${parent}' in parents and trashed=false`);
+        const j = await (await dfetch(token, `https://www.googleapis.com/drive/v3/files?q=${q}&fields=files(id,name)`)).json();
+        if (j.files && j.files.length) { parent = j.files[0].id; continue; }
+        const c = await (await dfetch(token, 'https://www.googleapis.com/drive/v3/files', {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ name, mimeType: 'application/vnd.google-apps.folder', parents: [parent] })
+        })).json();
+        parent = c.id;
+      }
+      return parent;
     };
 
     const driveFindFile = async (token, folderId) => {
@@ -955,7 +972,7 @@ Return ONLY a JSON object (no markdown, no preamble):
     // while the camera intent is foregrounded), the tab silently reloads.
     // We use localStorage (not sessionStorage) because a full process kill
     // can wipe sessionStorage but leaves localStorage intact.
-    const BUILD_VERSION = '2026-09-06c-drive-connect';
+    const BUILD_VERSION = '2026-09-06d-drive-folder-path';
     // Window for the rolling-average line on the intake charts, in days.
     const SMOOTH_DAYS = 14;
     const DIAG_KEY = 'macro_diag_error';

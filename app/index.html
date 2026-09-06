@@ -701,7 +701,8 @@ const imageToParts = async fileOrDataUrl => {
   };
 };
 const DRIVE_CLIENT_ID = '662075205003-gfgqm2s951u7hfnne86ok12trlvfdjom.apps.googleusercontent.com';
-const DRIVE_FOLDER = 'Macro App';
+const DRIVE_PATH = ['Macros', 'App Data'];
+const DRIVE_FOLDER = DRIVE_PATH.join(' / ');
 const DRIVE_FILE = 'macro.json';
 const gis = {
   token: null,
@@ -769,20 +770,29 @@ const dfetch = async (token, url, opts = {}) => {
   return r;
 };
 const driveFolder = async token => {
-  const q = encodeURIComponent(`name='${DRIVE_FOLDER}' and mimeType='application/vnd.google-apps.folder' and trashed=false`);
-  const j = await (await dfetch(token, `https://www.googleapis.com/drive/v3/files?q=${q}&fields=files(id,name)`)).json();
-  if (j.files && j.files.length) return j.files[0].id;
-  const c = await (await dfetch(token, 'https://www.googleapis.com/drive/v3/files', {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json'
-    },
-    body: JSON.stringify({
-      name: DRIVE_FOLDER,
-      mimeType: 'application/vnd.google-apps.folder'
-    })
-  })).json();
-  return c.id;
+  const esc = s => s.replace(/'/g, "\\'");
+  let parent = 'root';
+  for (const name of DRIVE_PATH) {
+    const q = encodeURIComponent(`name='${esc(name)}' and mimeType='application/vnd.google-apps.folder' and '${parent}' in parents and trashed=false`);
+    const j = await (await dfetch(token, `https://www.googleapis.com/drive/v3/files?q=${q}&fields=files(id,name)`)).json();
+    if (j.files && j.files.length) {
+      parent = j.files[0].id;
+      continue;
+    }
+    const c = await (await dfetch(token, 'https://www.googleapis.com/drive/v3/files', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify({
+        name,
+        mimeType: 'application/vnd.google-apps.folder',
+        parents: [parent]
+      })
+    })).json();
+    parent = c.id;
+  }
+  return parent;
 };
 const driveFindFile = async (token, folderId) => {
   const q = encodeURIComponent(`'${folderId}' in parents and name='${DRIVE_FILE}' and trashed=false`);
@@ -1582,7 +1592,7 @@ function ZoomablePreview({
     onClose: () => setOpen(false)
   }));
 }
-const BUILD_VERSION = '2026-09-06c-drive-connect';
+const BUILD_VERSION = '2026-09-06d-drive-folder-path';
 const SMOOTH_DAYS = 14;
 const DIAG_KEY = 'macro_diag_error';
 const LOG_KEY = 'macro_error_log';

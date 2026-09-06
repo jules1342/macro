@@ -45,7 +45,7 @@ Three external references remain, all deliberate:
 
 ## Google Drive sync
 
-One file, `macro.json`, in a folder called "Macro App". Macro's whole state is a single localStorage object, so unlike Receipts there are no images to reconcile: sync overwrites the file, restore replaces the device. Restore sits behind a two-tap confirm. The API key and the client ID are stripped from the payload.
+One file, at `Macros/App Data/macro.json`. `DRIVE_PATH` holds that as an array and `driveFolder` walks it from the Drive root, creating anything missing. One top-level folder per app with an "App Data" folder inside is the standing convention for Julian's apps, and it is also the only layout that works: `drive.file` lets an app see only files it created, so a shared "App Data" parent would leave a second app blind to it and creating a duplicate. Macro's whole state is a single localStorage object, so unlike Receipts there are no images to reconcile: sync overwrites the file, restore replaces the device. Restore sits behind a two-tap confirm. The API key and the client ID are stripped from the payload.
 
 The client ID is compiled into `macro.html` as `DRIVE_CLIENT_ID`, so there is nothing to paste on the phone: Settings shows a Connect Google Drive button and the ordinary Google account picker. Client IDs are public by design, the way every Sign in with Google app ships one in its JavaScript, and the `drive.file` scope limits the app to files it created itself. The origin restriction is what protects it, which is why the site address is fixed. Setup steps are in `README.md`.
 
