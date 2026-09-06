@@ -1645,7 +1645,7 @@ function ZoomablePreview({
     onClose: () => setOpen(false)
   }));
 }
-const BUILD_VERSION = '2026-09-06l-apple-icon';
+const BUILD_VERSION = '2026-09-06m-no-today-saved';
 const SMOOTH_DAYS = 14;
 const TDEE_WINDOW = 42;
 const DIAG_KEY = 'macro_diag_error';
@@ -2000,7 +2000,6 @@ function App() {
   const recoveryTabRef = useRef('photo');
   const [editEntry, setEditEntry] = useState(null);
   const [viewDate, setViewDate] = useState(todayStr());
-  const [addInitialSaved, setAddInitialSaved] = useState(null);
   const [profile, setProfile] = useState(null);
   const [targets, setTargets] = useState(null);
   const [weights, setWeights] = useState([]);
@@ -2241,17 +2240,6 @@ function App() {
     onPrev: () => shiftDay(-1),
     onNext: () => shiftDay(1),
     onToday: () => setViewDate(today),
-    favourites: favourites,
-    onPickFavourite: fav => {
-      setAddInitialSaved(fav);
-      setAddInitialTab('saved');
-      setAddOpen(true);
-    },
-    onOpenSaved: () => {
-      setAddInitialSaved(null);
-      setAddInitialTab('saved');
-      setAddOpen(true);
-    },
     onDelete: id => deleteEntry(viewDate, id),
     onEdit: entry => setEditEntry({
       entry,
@@ -2305,7 +2293,6 @@ function App() {
     view: view,
     setView: setView,
     onAdd: () => {
-      setAddInitialSaved(null);
       setAddInitialTab('photo');
       setAddOpen(true);
     }
@@ -2338,18 +2325,15 @@ function App() {
     logs: logs,
     initialTab: addInitialTab,
     initialFile: addInitialFile,
-    initialSaved: addInitialSaved,
     initialDate: view === 'today' ? viewDate : today,
     onClose: () => {
       setAddOpen(false);
       setAddInitialFile(null);
-      setAddInitialSaved(null);
     },
     onSave: entry => {
       addEntry(entry);
       setAddOpen(false);
       setAddInitialFile(null);
-      setAddInitialSaved(null);
     },
     onSetApiKey: k => saveApiKey(k),
     onRemoveFavourite: id => saveFavourites(favourites.filter(f => f.id !== id)),
@@ -2575,9 +2559,6 @@ function TodayView({
   onPrev,
   onNext,
   onToday,
-  favourites,
-  onPickFavourite,
-  onOpenSaved,
   onDelete,
   onEdit,
   isFavourite,
@@ -2718,77 +2699,7 @@ function TodayView({
     value: totals.f,
     target: t.fat,
     colour: "#8E5A8A"
-  }))), favourites && favourites.length > 0 && React.createElement("div", null, React.createElement("div", {
-    style: {
-      display: 'flex',
-      alignItems: 'baseline',
-      justifyContent: 'space-between'
-    }
-  }, React.createElement(SectionHeader, null, "Saved meals"), React.createElement("button", {
-    onClick: onOpenSaved,
-    style: {
-      background: 'transparent',
-      border: 'none',
-      color: C.accent,
-      fontSize: 12,
-      fontWeight: 600,
-      padding: 0
-    }
-  }, "More")), React.createElement("div", {
-    style: {
-      display: 'flex',
-      flexDirection: 'column',
-      gap: 6,
-      marginBottom: 18
-    }
-  }, favourites.slice(0, 4).map(f => React.createElement("button", {
-    key: f.id,
-    onClick: () => onPickFavourite(f),
-    style: {
-      background: C.surface,
-      border: `1px solid ${C.line}`,
-      borderRadius: 12,
-      padding: '10px 12px',
-      display: 'flex',
-      alignItems: 'center',
-      gap: 10,
-      textAlign: 'left',
-      width: '100%'
-    }
-  }, React.createElement("span", {
-    style: {
-      color: C.accent,
-      fontSize: 13
-    }
-  }, "★"), React.createElement("span", {
-    style: {
-      flex: 1,
-      minWidth: 0,
-      fontSize: 14,
-      fontWeight: 500,
-      overflow: 'hidden',
-      textOverflow: 'ellipsis',
-      whiteSpace: 'nowrap'
-    }
-  }, f.name), React.createElement("span", {
-    className: "num",
-    style: {
-      fontSize: 12,
-      color: C.inkMuted,
-      whiteSpace: 'nowrap'
-    }
-  }, Math.round(f.calories), " kcal · P ", Math.round(f.protein)), React.createElement("span", {
-    style: {
-      ...iconBtnStyle,
-      width: 26,
-      height: 26,
-      background: C.accent,
-      color: 'white',
-      border: 'none'
-    }
-  }, React.createElement(IconPlus, {
-    size: 13
-  })))))), React.createElement(SectionHeader, null, isToday ? "Today's food" : 'Food that day'), log.length === 0 ? React.createElement("div", {
+  }))), React.createElement(SectionHeader, null, isToday ? "Today's food" : 'Food that day'), log.length === 0 ? React.createElement("div", {
     style: {
       ...cardStyle,
       textAlign: 'center',
@@ -3117,7 +3028,6 @@ function AddSheet({
   onUpsertFavourite,
   initialTab,
   initialFile,
-  initialSaved,
   initialDate
 }) {
   const [tab, setTab] = useState(initialTab || 'photo');
@@ -3279,8 +3189,7 @@ function AddSheet({
     favourites: favourites,
     logs: logs,
     onRemoveFavourite: onRemoveFavourite,
-    onUpsertFavourite: onUpsertFavourite,
-    initialSaved: initialSaved
+    onUpsertFavourite: onUpsertFavourite
   })));
 }
 function SavedTab({
@@ -3290,10 +3199,9 @@ function SavedTab({
   favourites,
   logs,
   onRemoveFavourite,
-  onUpsertFavourite,
-  initialSaved
+  onUpsertFavourite
 }) {
-  const [selected, setSelected] = useState(initialSaved || null);
+  const [selected, setSelected] = useState(null);
   const [sub, setSub] = useState(favourites.length ? 'fav' : 'recent');
   const recent = useMemo(() => {
     const cutoff = new Date();

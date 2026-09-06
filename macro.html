@@ -1048,7 +1048,7 @@ Return ONLY a JSON object (no markdown, no preamble):
     // while the camera intent is foregrounded), the tab silently reloads.
     // We use localStorage (not sessionStorage) because a full process kill
     // can wipe sessionStorage but leaves localStorage intact.
-    const BUILD_VERSION = '2026-09-06l-apple-icon';
+    const BUILD_VERSION = '2026-09-06m-no-today-saved';
     // Window for the rolling-average line on the intake charts, in days.
     const SMOOTH_DAYS = 14;
     // Trailing window for each point on the maintenance-over-time chart. 28
@@ -1294,7 +1294,6 @@ Return ONLY a JSON object (no markdown, no preamble):
       const [editEntry, setEditEntry] = useState(null); // { entry, date }
       // The day the Today tab is showing. Arrows step it; + logs to it.
       const [viewDate, setViewDate] = useState(todayStr());
-      const [addInitialSaved, setAddInitialSaved] = useState(null);
 
       const [profile, setProfile] = useState(null);
       const [targets, setTargets] = useState(null);
@@ -1488,9 +1487,6 @@ Return ONLY a JSON object (no markdown, no preamble):
               <TodayView profile={profile} targets={targets} totals={totals} log={todayLog}
                 date={viewDate} isToday={viewDate === today}
                 onPrev={() => shiftDay(-1)} onNext={() => shiftDay(1)} onToday={() => setViewDate(today)}
-                favourites={favourites}
-                onPickFavourite={(fav) => { setAddInitialSaved(fav); setAddInitialTab('saved'); setAddOpen(true); }}
-                onOpenSaved={() => { setAddInitialSaved(null); setAddInitialTab('saved'); setAddOpen(true); }}
                 onDelete={(id) => deleteEntry(viewDate, id)}
                 onEdit={(entry) => setEditEntry({ entry, date: viewDate })}
                 isFavourite={isFavourite} onToggleFavourite={toggleFavourite}
@@ -1526,7 +1522,7 @@ Return ONLY a JSON object (no markdown, no preamble):
             )}
           </div>
 
-          <TabBar view={view} setView={setView} onAdd={() => { setAddInitialSaved(null); setAddInitialTab('photo'); setAddOpen(true); }} />
+          <TabBar view={view} setView={setView} onAdd={() => { setAddInitialTab('photo'); setAddOpen(true); }} />
 
           {pendingPhotoRecovery && (
             <PhotoRecoveryBanner
@@ -1561,10 +1557,9 @@ Return ONLY a JSON object (no markdown, no preamble):
               logs={logs}
               initialTab={addInitialTab}
               initialFile={addInitialFile}
-              initialSaved={addInitialSaved}
               initialDate={view === 'today' ? viewDate : today}
-              onClose={() => { setAddOpen(false); setAddInitialFile(null); setAddInitialSaved(null); }}
-              onSave={(entry) => { addEntry(entry); setAddOpen(false); setAddInitialFile(null); setAddInitialSaved(null); }}
+              onClose={() => { setAddOpen(false); setAddInitialFile(null); }}
+              onSave={(entry) => { addEntry(entry); setAddOpen(false); setAddInitialFile(null); }}
               onSetApiKey={(k) => saveApiKey(k)}
               onRemoveFavourite={(id) => saveFavourites(favourites.filter(f => f.id !== id))}
               onUpsertFavourite={upsertFavourite}
@@ -1666,7 +1661,7 @@ Return ONLY a JSON object (no markdown, no preamble):
     }
 
     // ====================== TODAY ======================
-    function TodayView({ profile, targets, totals, log, date, isToday, onPrev, onNext, onToday, favourites, onPickFavourite, onOpenSaved, onDelete, onEdit, isFavourite, onToggleFavourite }) {
+    function TodayView({ profile, targets, totals, log, date, isToday, onPrev, onNext, onToday, onDelete, onEdit, isFavourite, onToggleFavourite }) {
       const t = targets || { calories: 2000, protein: 150, carbs: 200, fat: 65 };
       const calPct = Math.min(100, (totals.cal / t.calories) * 100);
       const remaining = t.calories - totals.cal;
@@ -1713,27 +1708,6 @@ Return ONLY a JSON object (no markdown, no preamble):
             </div>
           </div>
 
-          {favourites && favourites.length > 0 && (
-            <div>
-              <div style={{ display: 'flex', alignItems: 'baseline', justifyContent: 'space-between' }}>
-                <SectionHeader>Saved meals</SectionHeader>
-                <button onClick={onOpenSaved} style={{ background: 'transparent', border: 'none', color: C.accent, fontSize: 12, fontWeight: 600, padding: 0 }}>More</button>
-              </div>
-              <div style={{ display: 'flex', flexDirection: 'column', gap: 6, marginBottom: 18 }}>
-                {favourites.slice(0, 4).map(f => (
-                  <button key={f.id} onClick={() => onPickFavourite(f)} style={{
-                    background: C.surface, border: `1px solid ${C.line}`, borderRadius: 12,
-                    padding: '10px 12px', display: 'flex', alignItems: 'center', gap: 10, textAlign: 'left', width: '100%'
-                  }}>
-                    <span style={{ color: C.accent, fontSize: 13 }}>★</span>
-                    <span style={{ flex: 1, minWidth: 0, fontSize: 14, fontWeight: 500, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{f.name}</span>
-                    <span className="num" style={{ fontSize: 12, color: C.inkMuted, whiteSpace: 'nowrap' }}>{Math.round(f.calories)} kcal · P {Math.round(f.protein)}</span>
-                    <span style={{ ...iconBtnStyle, width: 26, height: 26, background: C.accent, color: 'white', border: 'none' }}><IconPlus size={13}/></span>
-                  </button>
-                ))}
-              </div>
-            </div>
-          )}
           <SectionHeader>{isToday ? "Today's food" : 'Food that day'}</SectionHeader>
           {log.length === 0 ? (
             <div style={{ ...cardStyle, textAlign: 'center', color: C.inkMuted, padding: '32px 20px' }}>
@@ -1928,7 +1902,7 @@ Return ONLY a JSON object (no markdown, no preamble):
     const IconPencil = (p) => (<svg {...SvgBase(p)}><path d="M12 20h9"/><path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z"/></svg>);
 
     // ====================== ADD SHEET ======================
-    function AddSheet({ onClose, onSave, apiKey, onSetApiKey, favourites, logs, onRemoveFavourite, onUpsertFavourite, initialTab, initialFile, initialSaved, initialDate }) {
+    function AddSheet({ onClose, onSave, apiKey, onSetApiKey, favourites, logs, onRemoveFavourite, onUpsertFavourite, initialTab, initialFile, initialDate }) {
       const [tab, setTab] = useState(initialTab || 'photo');
       const [logDate, setLogDate] = useState(initialDate || todayStr());
       const wrappedSave = (entry) => onSave({ ...entry, date: logDate });
@@ -1981,14 +1955,14 @@ Return ONLY a JSON object (no markdown, no preamble):
             {tab === 'photo' && <PhotoTab onSave={wrappedSave} apiKey={apiKey} onSetApiKey={onSetApiKey} initialFile={initialFile} fixedMode="food"/>}
             {tab === 'label' && <PhotoTab onSave={wrappedSave} apiKey={apiKey} onSetApiKey={onSetApiKey} initialFile={initialFile} fixedMode="label"/>}
             {tab === 'manual' && <ManualTab onSave={wrappedSave} apiKey={apiKey} onSetApiKey={onSetApiKey}/>}
-            {tab === 'saved' && <SavedTab onSave={wrappedSave} apiKey={apiKey} onSetApiKey={onSetApiKey} favourites={favourites} logs={logs} onRemoveFavourite={onRemoveFavourite} onUpsertFavourite={onUpsertFavourite} initialSaved={initialSaved}/>}
+            {tab === 'saved' && <SavedTab onSave={wrappedSave} apiKey={apiKey} onSetApiKey={onSetApiKey} favourites={favourites} logs={logs} onRemoveFavourite={onRemoveFavourite} onUpsertFavourite={onUpsertFavourite}/>}
           </div>
         </div>
       );
     }
 
-    function SavedTab({ onSave, apiKey, onSetApiKey, favourites, logs, onRemoveFavourite, onUpsertFavourite, initialSaved }) {
-      const [selected, setSelected] = useState(initialSaved || null);
+    function SavedTab({ onSave, apiKey, onSetApiKey, favourites, logs, onRemoveFavourite, onUpsertFavourite }) {
+      const [selected, setSelected] = useState(null);
       // Favourites and Recent as two sub-tabs, so switching between them is a
       // tap rather than a scroll past the whole other list.
       const [sub, setSub] = useState(favourites.length ? 'fav' : 'recent');
