@@ -5,6 +5,7 @@
 Build and maintain Macro, Julian's personal food and macro tracker app.
 
 ## Decisions
+- **2026-10-01, Drive sync goes through an Apps Script relay and runs automatically.** Julian's call, over patching the in-app sign-in. The GIS token lasts an hour, cannot refresh without a tap, and was lost on every restart, so sync was manual and kept asking for sign-in. The relay (`drive-relay/Code.gs`) runs in his Google account, so the phone holds no token. One relay and one link serve Macro and Receipts. A new, never-synced phone does not auto-push until he restores or syncs by hand. The OAuth client in Google Cloud is now unused and can be deleted.
 - **Working preferences for this project.** No em dashes, ever. Australian English. AUD by default. Be concise, give pushback, and flag uncertainty.
 - **2026-08-10, the model is Opus 5 with thinking on at low effort.** Julian's call, made twice. Estimation errors were the complaint, and thinking makes the model do the arithmetic rather than recall it. He then set effort to low, because logging must be quick. Raise effort first if estimates drift.
 - **2026-08-10, the model never recalls a whole-item macro figure.** It works from per-100g values scaled to a stated weight, then reconciles them against the 4/4/9 factors. Recall of finished per-item numbers was the source of the egg error.

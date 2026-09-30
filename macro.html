@@ -155,8 +155,14 @@
           console.error('localStorage set failed', e);
           throw err;
         }
+        // driveSync is declared further down. typeof does not protect a const
+        // before its declaration runs, so a try covers any early call.
+        try { driveSync.mark(key); } catch (_) {}
       },
-      del: (key) => localStorage.removeItem(key),
+      del: (key) => {
+        localStorage.removeItem(key);
+        try { driveSync.mark(key); } catch (_) {}
+      },
       keys: (prefix = '') => Object.keys(localStorage).filter(k => k.startsWith(prefix)),
       all: () => {
         const out = {};
@@ -360,118 +366,52 @@
 
 
     // ---------- Google Drive sync (optional) ----------
-    // Ported from the Receipts app, which uses the same pattern. Macro's data
-    // is one localStorage object, so a single JSON file is the whole backup;
-    // there are no images to reconcile.
+    // Sync goes through the "App Data relay", a small Google Apps Script that
+    // runs in Julian's own Google account (source: drive-relay/Code.gs). The
+    // phone never holds a Google token. That is the whole point: a browser-only
+    // app can keep a Drive token for an hour at most and needs a tap on a Google
+    // pop-up to get another, so the old in-app sign-in could never sync in the
+    // background and asked for sign-in again after every restart.
     //
-    // The Google sign-in script is fetched from accounts.google.com on demand.
-    // That is an external dependency, but an unavoidable one: Google will not
-    // issue a token any other way. It loads only when you tap Sync or Restore,
-    // so it never sits in the boot path.
-    // The OAuth client ID is public by design, the way every Sign in with Google
-    // app ships one in its JavaScript. What protects it is the authorised origin
-    // registered against it: it only works from https://jules1342.github.io, so
-    // it is useless anywhere else. To rotate it, delete the client in the Google
-    // Cloud console and create a new one; do not try to scrub it from git.
-    const DRIVE_CLIENT_ID = '662075205003-gfgqm2s951u7hfnne86ok12trlvfdjom.apps.googleusercontent.com';
+    // The relay link (ending /exec?k=<key>) is the only credential. It lives in
+    // localStorage on this phone, is never in a backup, and must never be
+    // committed: the repo is public.
+    //
     // Drive layout, the standing convention for Julian's apps: one shared
-    // "App Data" folder at the Drive root, holding one folder per app.
-    //
-    // For this to work across apps they must SHARE this OAuth client ID. The
-    // drive.file scope only lets a client see files it created, so a second app
-    // on its own client would be blind to "App Data" and would quietly make a
-    // duplicate. All of Julian's apps are served from the same origin
-    // (https://jules1342.github.io), so one client ID covers them all.
-    const DRIVE_PATH = ['App Data', 'Macros'];
-    const DRIVE_FOLDER = DRIVE_PATH.join(' / ');
+    // "App Data" folder at the Drive root, holding one folder per app. The relay
+    // decides the folder from the app name, so the app cannot write anywhere else.
+    const DRIVE_FOLDER = 'App Data / Macros';
     const DRIVE_FILE = 'macro.json';
-    const gis = { token: null, exp: 0, client: null };
+    // The link is shared with Receipts (same origin, same localStorage), so
+    // pasting it into either app links both. Ready and dirty are per app.
+    const RELAY_URL_KEY = 'app_data_relay'; // device-only, never backed up
+    const RELAY_OK_KEY = 'drive_ready';    // this device may auto-sync
+    const RELAY_DIRTY_KEY = 'drive_dirty'; // changes waiting to go up
 
-    const loadGIS = () => new Promise((res, rej) => {
-      if (window.google && google.accounts) return res();
-      const s = document.createElement('script');
-      s.src = 'https://accounts.google.com/gsi/client';
-      s.async = true;
-      s.onload = () => res();
-      s.onerror = () => rej(new Error('Could not load the Google sign-in script. Check your connection.'));
-      document.head.appendChild(s);
-    });
-
-    const driveToken = async (clientId) => {
-      if (gis.token && Date.now() < gis.exp - 60000) return gis.token;
-      try {
-        const c = JSON.parse(sessionStorage.getItem('macro_gtoken') || 'null');
-        if (c && Date.now() < c.exp - 60000) { gis.token = c.token; gis.exp = c.exp; return c.token; }
-      } catch (_) {}
-      await loadGIS();
-      return new Promise((res, rej) => {
-        gis.client = google.accounts.oauth2.initTokenClient({
-          client_id: clientId,
-          // drive.file: the app can only see files it created itself.
-          scope: 'https://www.googleapis.com/auth/drive.file',
-          callback: (r) => {
-            if (r.error) return rej(new Error(r.error_description || r.error));
-            gis.token = r.access_token;
-            gis.exp = Date.now() + (r.expires_in || 3600) * 1000;
-            try { sessionStorage.setItem('macro_gtoken', JSON.stringify({ token: gis.token, exp: gis.exp })); } catch (_) {}
-            res(gis.token);
-          },
-          error_callback: (e) => rej(new Error(e && e.message ? e.message : 'Google sign-in was cancelled'))
-        });
-        gis.client.requestAccessToken({ prompt: '' });
-      });
-    };
-
-    const dfetch = async (token, url, opts = {}) => {
-      const r = await fetch(url, { ...opts, headers: { Authorization: 'Bearer ' + token, ...(opts.headers || {}) } });
-      if (!r.ok) {
-        let m = '';
-        try { m = (await r.json()).error.message; } catch (_) {}
-        throw new Error(m || `Drive HTTP ${r.status}`);
+    const relayUrl = () => { try { return localStorage.getItem(RELAY_URL_KEY) || ''; } catch (_) { return ''; } };
+    const relayLinkProblem = (u) => {
+      if (!/^https:\/\/script\.google\.com\/macros\/s\/[^/]+\/exec\?k=\w+/.test(u)) {
+        return /\/dev(\?|$)/.test(u)
+          ? 'That is the test (/dev) link. Use the Web app link ending in /exec, plus ?k=your key.'
+          : 'That does not look like the relay link. It starts https://script.google.com/macros/s/ and ends /exec?k=...';
       }
-      return r;
+      return '';
     };
 
-    // Walks DRIVE_PATH from the Drive root, creating any folder that is missing,
-    // and returns the id of the last one. Escapes apostrophes because folder
-    // names go into a Drive query string.
-    const driveFolder = async (token) => {
-      const esc = (s) => s.replace(/'/g, "\\'");
-      let parent = 'root';
-      for (const name of DRIVE_PATH) {
-        const q = encodeURIComponent(
-          `name='${esc(name)}' and mimeType='application/vnd.google-apps.folder' and '${parent}' in parents and trashed=false`);
-        const j = await (await dfetch(token, `https://www.googleapis.com/drive/v3/files?q=${q}&fields=files(id,name)`)).json();
-        if (j.files && j.files.length) { parent = j.files[0].id; continue; }
-        const c = await (await dfetch(token, 'https://www.googleapis.com/drive/v3/files', {
-          method: 'POST', headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ name, mimeType: 'application/vnd.google-apps.folder', parents: [parent] })
-        })).json();
-        parent = c.id;
-      }
-      return parent;
+    // Plain text body, so the browser sends a "simple" request with no CORS
+    // preflight. Apps Script answers through a redirect that allows any origin.
+    const relayCall = async (body, url = relayUrl()) => {
+      if (!url) throw new Error('Drive sync is not linked on this phone.');
+      let r;
+      try { r = await fetch(url, { method: 'POST', body: JSON.stringify({ app: APP_ID, ...body }) }); }
+      catch (_) { throw new Error('Could not reach the Drive relay. Check your connection.'); }
+      if (!r.ok) throw new Error(`Drive relay HTTP ${r.status}`);
+      let j;
+      try { j = await r.json(); }
+      catch (_) { throw new Error('The relay did not answer with data. Check it is deployed with access set to Anyone.'); }
+      if (j.error) throw new Error(j.error);
+      return j;
     };
-
-    const driveFindFile = async (token, folderId) => {
-      const q = encodeURIComponent(`'${folderId}' in parents and name='${DRIVE_FILE}' and trashed=false`);
-      const j = await (await dfetch(token, `https://www.googleapis.com/drive/v3/files?q=${q}&fields=files(id,name,modifiedTime)`)).json();
-      return (j.files && j.files[0]) || null;
-    };
-
-    const driveUpload = async (token, folderId, blob, existingId) => {
-      const meta = existingId ? {} : { name: DRIVE_FILE, parents: [folderId] };
-      const form = new FormData();
-      form.append('metadata', new Blob([JSON.stringify(meta)], { type: 'application/json' }));
-      form.append('file', blob);
-      const url = existingId
-        ? `https://www.googleapis.com/upload/drive/v3/files/${existingId}?uploadType=multipart`
-        : 'https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart';
-      const j = await (await dfetch(token, url, { method: existingId ? 'PATCH' : 'POST', body: form })).json();
-      return j.id;
-    };
-
-    const driveDownloadJson = async (token, id) =>
-      (await dfetch(token, `https://www.googleapis.com/drive/v3/files/${id}?alt=media`)).json();
 
     // The payload is the same shape the Export JSON button produces, so a Drive
     // file and an exported file are interchangeable.
@@ -513,6 +453,85 @@
       }
       return keys;
     };
+
+    // ---------- Automatic Drive sync ----------
+    // Any change to a backed-up key marks the tracker dirty (S.set and S.del call
+    // driveSync.mark). A dirty tracker is pushed 8 seconds after the last change,
+    // when the app goes to the background, when it comes back, and when the
+    // phone comes back online. The dirty flag lives in localStorage, so a push
+    // that was cut off when Android froze the app is retried on the next open.
+    //
+    // Safety: a device only auto-syncs once it is known to hold the real data,
+    // meaning it has synced before or has just restored from Drive. A new phone
+    // that links the relay starts empty, and pushing that would overwrite the
+    // backup, so it waits until Julian taps Restore or Sync.
+    const driveSync = (() => {
+      const subs = new Set();
+      let timer = null, running = null, again = false, gen = 0;
+      const ls = (k) => { try { return localStorage.getItem(k); } catch (_) { return null; } };
+      const st = { busy: false, error: null };
+      const emit = () => subs.forEach(fn => { try { fn({ ...st }); } catch (_) {} });
+      const linked = () => !!relayUrl();
+      // A phone that has synced before already holds the real data, which
+      // also covers a phone linked from the Receipts app.
+      const ready = () => linked() && (ls(RELAY_OK_KEY) === '1' || !!S.get('drive_last_sync'));
+      const dirty = () => ls(RELAY_DIRTY_KEY) === '1';
+
+      const push = async () => {
+        const g = gen;
+        const text = JSON.stringify(backupPayload(), null, 2);
+        const r = await relayCall({ action: 'putText', name: DRIVE_FILE, text });
+        const when = new Date().toISOString();
+        S.set('drive_last_sync', when);
+        try {
+          localStorage.setItem(RELAY_OK_KEY, '1');
+          if (gen === g) localStorage.removeItem(RELAY_DIRTY_KEY); // nothing changed mid-push
+        } catch (_) {}
+        return r;
+      };
+
+      // One push at a time. A change that lands mid-push queues one more.
+      const run = async (force = false) => {
+        if (!(force ? linked() : ready())) return null;
+        if (running) { again = true; return running; }
+        clearTimeout(timer); timer = null;
+        st.busy = true; emit();
+        running = (async () => {
+          try { const r = await push(); st.error = null; return r; }
+          catch (e) { st.error = e.message; if (force) throw e; return null; }
+          finally {
+            running = null; st.busy = false; emit();
+            if (again) { again = false; if (dirty()) run(); }
+          }
+        })();
+        return running;
+      };
+
+      const mark = (key) => {
+        if (key === 'drive_last_sync' || !isBackupKey(key)) return;
+        if (!linked()) return;
+        gen++;
+        try { localStorage.setItem(RELAY_DIRTY_KEY, '1'); } catch (_) {}
+        if (!ready()) return;
+        clearTimeout(timer);
+        timer = setTimeout(() => run(), 8000);
+      };
+
+      // Also pushes once when the link was made in the Receipts app, since this
+      // app has then never pushed through the relay.
+      const flush = () => { if (ready() && (dirty() || ls(RELAY_OK_KEY) !== '1')) run(); };
+      document.addEventListener('visibilitychange', flush);
+      window.addEventListener('online', flush);
+      window.addEventListener('pagehide', flush);
+      setTimeout(flush, 3000); // on open
+
+      return {
+        mark, run, flush, linked, ready,
+        subscribe: (fn) => { subs.add(fn); fn({ ...st }); return () => subs.delete(fn); },
+        setReady: () => { try { localStorage.setItem(RELAY_OK_KEY, '1'); } catch (_) {} },
+        unlink: () => { clearTimeout(timer); try { [RELAY_URL_KEY, RELAY_OK_KEY, RELAY_DIRTY_KEY].forEach(k => localStorage.removeItem(k)); } catch (_) {} st.error = null; emit(); },
+      };
+    })();
 
     const ANTHROPIC_URL = "https://api.anthropic.com/v1/messages";
 
@@ -1052,7 +1071,7 @@ Return ONLY a JSON object (no markdown, no preamble):
     // while the camera intent is foregrounded), the tab silently reloads.
     // We use localStorage (not sessionStorage) because a full process kill
     // can wipe sessionStorage but leaves localStorage intact.
-    const BUILD_VERSION = '2026-09-06y-tdee-note-adaptation';
+    const BUILD_VERSION = '2026-10-01a-drive-relay-autosync';
     // Window for the rolling-average line on the intake charts, in days.
     const SMOOTH_DAYS = 14;
     // Trailing window for each point on the maintenance-over-time chart. The
@@ -4842,46 +4861,56 @@ Return ONLY a JSON object (no markdown, no preamble):
       const [keyVisible, setKeyVisible] = useState(false);
       const [confirmReset, setConfirmReset] = useState(false);
       const importRef = useRef();
-      // Google Drive sync. The client ID is compiled in, so there is nothing to
-      // paste: connecting is the ordinary Google account picker.
-      const [driveOn, setDriveOn] = useState(() => !!S.get('drive_connected'));
+      // Google Drive sync, through the App Data relay (see driveSync).
+      const [driveOn, setDriveOn] = useState(() => driveSync.linked());
       const [driveBusy, setDriveBusy] = useState('');
       const [driveMsg, setDriveMsg] = useState(null);
       const [confirmRestore, setConfirmRestore] = useState(false);
       const [lastSync, setLastSync] = useState(() => S.get('drive_last_sync') || null);
+      const [relayInput, setRelayInput] = useState('');
+      const [auto, setAuto] = useState({ busy: false, error: null });
+      const [needsChoice, setNeedsChoice] = useState(() => driveSync.linked() && !driveSync.ready());
+      useEffect(() => driveSync.subscribe((st) => { setAuto(st); setLastSync(S.get('drive_last_sync') || null); }), []);
 
-      // First connect. Google shows the account picker and the consent screen;
-      // after that the token refreshes silently until the grant is revoked.
+      // Linking checks the relay answers and whether Drive already has a backup.
+      // A phone that has synced before carries on automatically. A phone that
+      // never has must choose: restore the Drive copy, or overwrite it.
       const driveConnect = async () => {
+        const url = relayInput.trim();
+        const bad = relayLinkProblem(url);
+        if (bad) { setDriveMsg({ ok: false, text: bad }); return; }
         setDriveBusy('connect'); setDriveMsg(null);
         try {
-          await driveToken(DRIVE_CLIENT_ID);
-          S.set('drive_connected', true); setDriveOn(true);
-          setDriveMsg({ ok: true, text: 'Connected. Tap Sync to Drive to save a copy.' });
+          const j = await relayCall({ action: 'ping', name: DRIVE_FILE }, url);
+          localStorage.setItem(RELAY_URL_KEY, url);
+          setDriveOn(true); setRelayInput('');
+          const syncedBefore = !!S.get('drive_last_sync');
+          if (syncedBefore || !j.file) {
+            driveSync.setReady(); setNeedsChoice(false);
+            await driveSync.run(true);
+            setDriveMsg({ ok: true, text: `Linked. Macro now keeps "${j.folder}" up to date on its own.` });
+          } else {
+            setNeedsChoice(true);
+            const when = new Date(j.file.modifiedTime).toLocaleString('en-AU', { day: 'numeric', month: 'short', hour: 'numeric', minute: '2-digit' });
+            setDriveMsg({ ok: true, text: `Linked. Drive already has a backup from ${when}. Restore it to this phone, or tap Sync to replace it with this phone's data. Auto-sync starts after either.` });
+          }
         } catch (e) {
           setDriveMsg({ ok: false, text: e.message });
         } finally { setDriveBusy(''); }
       };
 
       const driveDisconnect = () => {
-        try { sessionStorage.removeItem('macro_gtoken'); } catch (_) {}
-        gis.token = null; gis.exp = 0;
-        S.del('drive_connected');
-        setDriveOn(false); setDriveMsg(null); setConfirmRestore(false);
+        driveSync.unlink();
+        setDriveOn(false); setDriveMsg(null); setConfirmRestore(false); setNeedsChoice(false);
       };
 
-      const driveSync = async () => {
+      const driveSyncNow = async () => {
         setDriveBusy('sync'); setDriveMsg(null);
         try {
-          const token = await driveToken(DRIVE_CLIENT_ID);
-          const folderId = await driveFolder(token);
-          const existing = await driveFindFile(token, folderId);
-          const blob = new Blob([JSON.stringify(backupPayload(), null, 2)], { type: 'application/json' });
-          await driveUpload(token, folderId, blob, existing && existing.id);
-          const when = new Date().toISOString();
-          S.set('drive_last_sync', when); setLastSync(when);
-          S.set('drive_connected', true); setDriveOn(true);
-          setDriveMsg({ ok: true, text: existing ? 'Drive backup updated.' : `Created "${DRIVE_FOLDER}" in your Drive.` });
+          await driveSync.run(true);
+          setNeedsChoice(false);
+          setLastSync(S.get('drive_last_sync'));
+          setDriveMsg({ ok: true, text: 'Drive backup updated.' });
         } catch (e) {
           setDriveMsg({ ok: false, text: e.message });
         } finally { setDriveBusy(''); }
@@ -4890,12 +4919,12 @@ Return ONLY a JSON object (no markdown, no preamble):
       const driveRestore = async () => {
         setDriveBusy('restore'); setDriveMsg(null); setConfirmRestore(false);
         try {
-          const token = await driveToken(DRIVE_CLIENT_ID);
-          const folderId = await driveFolder(token);
-          const existing = await driveFindFile(token, folderId);
-          if (!existing) throw new Error(`No ${DRIVE_FILE} in your Drive yet. Sync from a device that has your data first.`);
-          const data = await driveDownloadJson(token, existing.id);
-          const n = applyBackup(data);
+          const j = await relayCall({ action: 'getText', name: DRIVE_FILE });
+          if (j.text == null) throw new Error(`No ${DRIVE_FILE} in your Drive yet. Sync from a device that has your data first.`);
+          const n = applyBackup(JSON.parse(j.text));
+          // This phone now matches Drive, so it is safe to auto-sync from here on.
+          driveSync.setReady();
+          try { localStorage.removeItem(RELAY_DIRTY_KEY); } catch (_) {}
           alert(`Restored ${n} items from Drive. Reloading...`);
           window.location.reload();
         } catch (e) {
@@ -5049,31 +5078,36 @@ Return ONLY a JSON object (no markdown, no preamble):
           <SectionHeader>Google Drive sync</SectionHeader>
           <div style={cardStyle}>
             <InfoNote summary="What sync does" style={{ marginTop: 0, marginBottom: 12 }}>
-              Keeps a copy of your tracker in a folder called <b style={{ color: C.inkMuted }}>{DRIVE_FOLDER}</b> in your Drive, so a new phone can be set up from it. Macro can only see files it created itself, never the rest of your Drive. Your API key is never included.
+              Keeps a copy of your tracker in <b style={{ color: C.inkMuted }}>{DRIVE_FOLDER}</b> in your Drive, updated automatically a few seconds after each change, so a new phone can be set up from it. It goes through the App Data relay, a small script in your own Google account, so there is no Google sign-in on the phone and nothing expires. The same link works in Receipts, and unlinking here unlinks both. Your API key is never included.
             </InfoNote>
             {!driveOn ? (
-              <button onClick={driveConnect} disabled={!!driveBusy}
-                style={{ ...secondaryBtn, marginTop: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 10, opacity: driveBusy ? 0.5 : 1 }}>
-                <svg width="17" height="17" viewBox="0 0 48 48" aria-hidden="true">
+              <div>
+                <input value={relayInput} onChange={e => setRelayInput(e.target.value)}
+                  placeholder="Paste the relay link (…/exec?k=…)" autoCapitalize="off" autoCorrect="off" spellCheck={false}
+                  style={{ width: '100%', padding: '10px 12px', borderRadius: 8, border: `1px solid ${C.line}`, fontSize: 13, marginBottom: 10, background: C.surface, color: C.ink, fontFamily: 'monospace', boxSizing: 'border-box' }}/>
+                <button onClick={driveConnect} disabled={!!driveBusy || !relayInput.trim()}
+                  style={{ ...secondaryBtn, marginTop: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 10, opacity: (driveBusy || !relayInput.trim()) ? 0.5 : 1 }}>
+                  <svg width="17" height="17" viewBox="0 0 48 48" aria-hidden="true">
                   <path fill="#4285F4" d="M45.1 24.5c0-1.6-.1-3.1-.4-4.5H24v8.5h11.8c-.5 2.7-2 5-4.4 6.600v5.5h7.1c4.2-3.8 6.6-9.5 6.6-16.1z"/>
                   <path fill="#34A853" d="M24 46c6 0 11-2 14.6-5.4l-7.1-5.5c-2 1.3-4.5 2.1-7.5 2.1-5.8 0-10.7-3.9-12.4-9.1H4.3v5.7C7.9 41 15.4 46 24 46z"/>
                   <path fill="#FBBC05" d="M11.6 28.1c-.4-1.3-.7-2.7-.7-4.1s.3-2.8.7-4.1v-5.7H4.3C2.8 17.1 2 20.4 2 24s.8 6.9 2.3 9.8l7.3-5.7z"/>
                   <path fill="#EA4335" d="M24 10.8c3.3 0 6.2 1.1 8.5 3.3l6.3-6.3C35 4.3 30 2 24 2 15.4 2 7.9 7 4.3 14.2l7.3 5.7c1.7-5.2 6.6-9.1 12.4-9.1z"/>
                 </svg>
-                {driveBusy === 'connect' ? 'Connecting...' : 'Connect Google Drive'}
-              </button>
+                  {driveBusy === 'connect' ? 'Linking...' : 'Link Google Drive'}
+                </button>
+              </div>
             ) : (
               <div>
                 <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 12 }}>
-                  <span style={{ width: 7, height: 7, borderRadius: 4, background: C.green }}/>
-                  <span style={{ flex: 1, fontSize: 13, color: C.ink }}>Connected</span>
+                  <span style={{ width: 7, height: 7, borderRadius: 4, background: auto.error ? C.red : needsChoice ? C.inkSoft : C.green }}/>
+                  <span style={{ flex: 1, fontSize: 13, color: C.ink }}>{auto.busy ? 'Syncing...' : needsChoice ? 'Linked, waiting for Restore or Sync' : 'Auto-sync on'}</span>
                   <button onClick={driveDisconnect}
-                    style={{ ...iconBtnStyle, width: 'auto', padding: '6px 12px', fontSize: 12 }}>Disconnect</button>
+                    style={{ ...iconBtnStyle, width: 'auto', padding: '6px 12px', fontSize: 12 }}>Unlink</button>
                 </div>
                 <div style={{ display: 'flex', gap: 8 }}>
-                  <button onClick={driveSync} disabled={!!driveBusy}
-                    style={{ ...secondaryBtn, marginTop: 0, flex: 1, opacity: driveBusy ? 0.5 : 1 }}>
-                    {driveBusy === 'sync' ? 'Syncing...' : 'Sync to Drive'}
+                  <button onClick={driveSyncNow} disabled={!!driveBusy || auto.busy}
+                    style={{ ...secondaryBtn, marginTop: 0, flex: 1, opacity: (driveBusy || auto.busy) ? 0.5 : 1 }}>
+                    {driveBusy === 'sync' ? 'Syncing...' : 'Sync now'}
                   </button>
                   {!confirmRestore ? (
                     <button onClick={() => setConfirmRestore(true)} disabled={!!driveBusy}
@@ -5089,6 +5123,9 @@ Return ONLY a JSON object (no markdown, no preamble):
                   <div style={{ fontSize: 12, color: C.inkMuted, marginTop: 8 }}>
                     Restore replaces this device's logs, weights and targets with the Drive copy. Tap again to confirm, or <button onClick={() => setConfirmRestore(false)} style={{ border: 'none', background: 'transparent', color: C.accent, padding: 0, font: 'inherit', cursor: 'pointer' }}>cancel</button>.
                   </div>
+                )}
+                {auto.error && !driveMsg && (
+                  <div style={{ fontSize: 12, color: C.red, marginTop: 10, lineHeight: 1.45 }}>Last auto-sync failed: {auto.error}. It retries on the next change or when you reopen the app.</div>
                 )}
                 {lastSync && !driveMsg && (
                   <div style={{ fontSize: 11, color: C.inkSoft, marginTop: 10 }}>

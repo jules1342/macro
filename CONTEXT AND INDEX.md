@@ -15,6 +15,7 @@ Three things govern all work here. First, `macro.html` is the source and `app/in
 - **README.md**: primary source. The repo's own front page. Build, deploy, phone install, the Google Drive setup steps, export and import.
 - **Macro technical notes.md**: primary source. The model configuration, device-specific findings, the calculation traps, decisions that look wrong but are not, and the pre-ship checklist. Read it before you do work on Macro.
 - **macro.html**: primary source. The JSX source for the whole app, and the only file to edit.
+- **drive-relay/Code.gs**: primary source. The App Data relay, a Google Apps Script that does Drive sync for Macro and Receipts. It runs in Julian's Google account, not here; setup steps are in `README.md`.
 - **_build/**: primary source. `build.js` compiles `macro.html` into `app/index.html` and inlines React from `vendor/`. `icons.js` draws the two icons. `deploy.cmd` builds, commits and pushes in one step. `package.json` declares Babel, and the build reinstalls it when the synced folder prunes `node_modules/`.
 - **app/**: deliverable. The built app that GitHub Pages serves. `index.html` is generated on every build and must never be edited by hand. `manifest.webmanifest`, `sw.js` and the two icons are static, and `sw.js` is edited in place.
 - **import/**: primary source, and git-ignored. The three one-time import files that seeded Julian's history. They hold his real weights and calorie history, so they must never be committed to the public repo. They are already used, and running them again makes duplicate data.

@@ -1,7 +1,7 @@
 # Macro: build, deploy, set up
 
 ## What it is
-A phone web app (PWA) that logs food and macros. Photograph a nutrition panel or a meal, Claude reads it, and the entry files against daily targets. Weight, calories and protein each get a trend chart. Data lives in this browser's storage on the phone. Backup is a JSON export, or Google Drive sync once the OAuth client is set up.
+A phone web app (PWA) that logs food and macros. Photograph a nutrition panel or a meal, Claude reads it, and the entry files against daily targets. Weight, calories and protein each get a trend chart. Data lives in this browser's storage on the phone. Backup is a JSON export, or automatic Google Drive sync through the App Data relay.
 
 Hosted on GitHub Pages at https://jules1342.github.io/macro/
 
@@ -33,34 +33,25 @@ Open the site in Chrome on Android, tap the menu, Add to Home screen. It opens f
 ## Claude API key
 Settings, paste the key from console.anthropic.com. It stays in the browser storage on the phone, and calls go straight to Anthropic. It is never included in an export or a Drive sync. Extraction uses `claude-opus-5` at low effort.
 
-## Google Drive sync (optional, one-time setup, about 10 minutes)
-The app needs an OAuth client ID that is allowed to run from this site's address.
+## Google Drive sync (optional, one-time setup, about 5 minutes)
 
-Google reorganised this part of the console in 2024 and 2025. There is no longer a page called "OAuth consent screen". It is now **Google Auth Platform**, split into Branding, Audience, Data Access and Clients. Older guides on the web still describe the old layout.
+Sync goes through the **App Data relay**, a small Google Apps Script that runs in your own Google account (`drive-relay/Code.gs`). The phone never signs in to Google, so nothing expires and sync runs on its own. One relay serves both Macro and Receipts.
 
-1. Go to https://console.cloud.google.com and sign in with the Google account whose Drive you want to use. Create a project, any name, and make sure it is selected in the bar at the top.
-2. **Enable the API.** APIs & Services, Library, search for "Google Drive API", Enable.
-3. **Open Google Auth Platform.** Type it into the console search bar. On a new project you get a **Get started** button instead of the tabs. It asks for four things in order:
-   - **App Information**: app name, and a user support email from the dropdown.
-   - **Audience**: choose **External**. Internal is only for Workspace organisations.
-   - **Contact Information**: your email address.
-   - **Finish**: agree to the Google API Services User Data Policy, then **Create**.
-4. **Publish the app.** On the **Audience** page, click **Publish app**.
+Why not the old in-app Google sign-in: a browser-only app can hold a Drive token for one hour at most, and getting another needs a tap on a Google pop-up. So it could never sync in the background, and it asked you to sign in again after every restart.
 
-   Do not leave it in Testing. A Testing app expires each authorisation after 7 days, so sync would break about weekly and need re-consenting. The `drive.file` scope this app uses is **non-sensitive**, because it only reaches files the app itself created, so publishing does not trigger Google's verification review. If it ever does ask for verification, go back to Testing and add yourself under **Test users**, **Add users**, and accept the weekly re-consent.
-5. **Create the client.** Left sidebar, **Clients**, **Create client**. Application type **Web application**, name it anything. Under **Authorised JavaScript origins**, **Add URI**, and enter exactly:
+1. On a computer, go to https://script.google.com, **New project**, name it "App Data relay". Replace the contents of `Code.gs` with `drive-relay/Code.gs` from this repo. Save.
+2. **Deploy, New deployment**, gear icon, **Web app**. Execute as: **Me**. Who has access: **Anyone**. Deploy. Authorise when asked; Google warns the app is unverified because you wrote it yourself, so choose Advanced, Go to App Data relay, Allow.
+3. In the function menu pick **setup** and press **Run**. The log shows the relay link, ending `/exec?k=...`. If it shows `/dev` or nothing, copy the Web app URL from Deploy, Manage deployments, and add `?k=` plus the key from the log.
+4. Get the link to the phone (email or message it to yourself). In the app: Settings, Google Drive sync, paste it, **Link Google Drive**. Pasting it in Macro links Receipts too.
 
-       https://jules1342.github.io
+What happens next:
+- A phone that has synced before starts auto-syncing straight away.
+- A phone that never has (a new phone), where Drive already holds a backup, waits: tap **Restore from Drive** to pull the backup, or **Sync now** to replace it. This stops an empty new phone overwriting your history.
+- After that, every change is pushed to `App Data/Macros/macro.json` about 8 seconds later, and again when the app goes to the background or reopens if a push was cut off.
 
-   Scheme and host only. No `/macro/` path and no trailing slash. This is the most common mistake. Leave **Authorised redirect URIs** empty, because the app uses the token flow and never redirects.
-6. **Create**, then copy the **Client ID**, which ends in `.apps.googleusercontent.com`. Ignore the client secret, which is only for server-side apps. Set it as `DRIVE_CLIENT_ID` near the top of `macro.html`, then rebuild and push. It is compiled into the app, so there is nothing to paste on the phone.
-7. In the app: Settings, Google Drive sync, **Connect Google Drive**, and sign in. Then tap **Sync to Drive**. Google asks you to sign in and allow "See, edit, create and delete only the specific Google Drive files that you use with this app". That scope means the app can only touch files it created.
+The relay link is the only credential. Keep it private and never commit it: this repo is public. To revoke it, delete the deployment (or change the key in the script's properties and run setup again).
 
-The app keeps `App Data/Macros/macro.json` in your Drive. One shared "App Data" folder holding a folder per app is the convention for all of Julian's apps. For it to hold, every app must reuse this same OAuth client ID: the `drive.file` scope lets a client see only files it created, so an app on its own client would be blind to the shared folder and would create a duplicate. All the apps sit on `https://jules1342.github.io`, so one client covers them. Sync overwrites it with the current device state. Restore pulls it back and replaces this device's data, so a new phone can be set up from it. Sync is manual: tap it after a change worth keeping.
-
-The client ID is not a secret. OAuth client IDs are public by design, the way every Sign in with Google app ships one in its JavaScript, and the origin restriction is what protects them. Ours is committed to this public repo deliberately. To rotate it, delete the client in the Google Cloud console and create a new one; do not try to scrub git history.
-
-Note: the Drive code could not be exercised from the build machine, because it needs your Google account and the live site URL. Expect to report back on the first try.
+If you edit the script later: Deploy, Manage deployments, edit, Version: New version. That keeps the same link.
 
 ## Export and import
 Settings, Backup & data. Export JSON writes a dated file to your downloads. Import JSON reads it back and overwrites the matching keys. Neither touches the API key.

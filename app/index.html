@@ -381,6 +381,7 @@ function(a,b,c){if(!Vd(b))throw Error(m(200));return Wd(null,a,b,!1,c)};Q.unmoun
 
 </script>
   <script>/* Macro app (precompiled, no Babel) */
+function _extends() { return _extends = Object.assign ? Object.assign.bind() : function (n) { for (var e = 1; e < arguments.length; e++) { var t = arguments[e]; for (var r in t) ({}).hasOwnProperty.call(t, r) && (n[r] = t[r]); } return n; }, _extends.apply(null, arguments); }
 const {
   useState,
   useEffect,
@@ -458,8 +459,16 @@ const S = {
       console.error('localStorage set failed', e);
       throw err;
     }
+    try {
+      driveSync.mark(key);
+    } catch (_) {}
   },
-  del: key => localStorage.removeItem(key),
+  del: key => {
+    localStorage.removeItem(key);
+    try {
+      driveSync.mark(key);
+    } catch (_) {}
+  },
   keys: (prefix = '') => Object.keys(localStorage).filter(k => k.startsWith(prefix)),
   all: () => {
     const out = {};
@@ -706,123 +715,48 @@ const imageToParts = async fileOrDataUrl => {
     data: await fileToBase64(fileOrDataUrl)
   };
 };
-const DRIVE_CLIENT_ID = '662075205003-gfgqm2s951u7hfnne86ok12trlvfdjom.apps.googleusercontent.com';
-const DRIVE_PATH = ['App Data', 'Macros'];
-const DRIVE_FOLDER = DRIVE_PATH.join(' / ');
+const DRIVE_FOLDER = 'App Data / Macros';
 const DRIVE_FILE = 'macro.json';
-const gis = {
-  token: null,
-  exp: 0,
-  client: null
-};
-const loadGIS = () => new Promise((res, rej) => {
-  if (window.google && google.accounts) return res();
-  const s = document.createElement('script');
-  s.src = 'https://accounts.google.com/gsi/client';
-  s.async = true;
-  s.onload = () => res();
-  s.onerror = () => rej(new Error('Could not load the Google sign-in script. Check your connection.'));
-  document.head.appendChild(s);
-});
-const driveToken = async clientId => {
-  if (gis.token && Date.now() < gis.exp - 60000) return gis.token;
+const RELAY_URL_KEY = 'app_data_relay';
+const RELAY_OK_KEY = 'drive_ready';
+const RELAY_DIRTY_KEY = 'drive_dirty';
+const relayUrl = () => {
   try {
-    const c = JSON.parse(sessionStorage.getItem('macro_gtoken') || 'null');
-    if (c && Date.now() < c.exp - 60000) {
-      gis.token = c.token;
-      gis.exp = c.exp;
-      return c.token;
-    }
-  } catch (_) {}
-  await loadGIS();
-  return new Promise((res, rej) => {
-    gis.client = google.accounts.oauth2.initTokenClient({
-      client_id: clientId,
-      scope: 'https://www.googleapis.com/auth/drive.file',
-      callback: r => {
-        if (r.error) return rej(new Error(r.error_description || r.error));
-        gis.token = r.access_token;
-        gis.exp = Date.now() + (r.expires_in || 3600) * 1000;
-        try {
-          sessionStorage.setItem('macro_gtoken', JSON.stringify({
-            token: gis.token,
-            exp: gis.exp
-          }));
-        } catch (_) {}
-        res(gis.token);
-      },
-      error_callback: e => rej(new Error(e && e.message ? e.message : 'Google sign-in was cancelled'))
-    });
-    gis.client.requestAccessToken({
-      prompt: ''
-    });
-  });
-};
-const dfetch = async (token, url, opts = {}) => {
-  const r = await fetch(url, {
-    ...opts,
-    headers: {
-      Authorization: 'Bearer ' + token,
-      ...(opts.headers || {})
-    }
-  });
-  if (!r.ok) {
-    let m = '';
-    try {
-      m = (await r.json()).error.message;
-    } catch (_) {}
-    throw new Error(m || `Drive HTTP ${r.status}`);
+    return localStorage.getItem(RELAY_URL_KEY) || '';
+  } catch (_) {
+    return '';
   }
-  return r;
 };
-const driveFolder = async token => {
-  const esc = s => s.replace(/'/g, "\\'");
-  let parent = 'root';
-  for (const name of DRIVE_PATH) {
-    const q = encodeURIComponent(`name='${esc(name)}' and mimeType='application/vnd.google-apps.folder' and '${parent}' in parents and trashed=false`);
-    const j = await (await dfetch(token, `https://www.googleapis.com/drive/v3/files?q=${q}&fields=files(id,name)`)).json();
-    if (j.files && j.files.length) {
-      parent = j.files[0].id;
-      continue;
-    }
-    const c = await (await dfetch(token, 'https://www.googleapis.com/drive/v3/files', {
+const relayLinkProblem = u => {
+  if (!/^https:\/\/script\.google\.com\/macros\/s\/[^/]+\/exec\?k=\w+/.test(u)) {
+    return /\/dev(\?|$)/.test(u) ? 'That is the test (/dev) link. Use the Web app link ending in /exec, plus ?k=your key.' : 'That does not look like the relay link. It starts https://script.google.com/macros/s/ and ends /exec?k=...';
+  }
+  return '';
+};
+const relayCall = async (body, url = relayUrl()) => {
+  if (!url) throw new Error('Drive sync is not linked on this phone.');
+  let r;
+  try {
+    r = await fetch(url, {
       method: 'POST',
-      headers: {
-        'Content-Type': 'application/json'
-      },
       body: JSON.stringify({
-        name,
-        mimeType: 'application/vnd.google-apps.folder',
-        parents: [parent]
+        app: APP_ID,
+        ...body
       })
-    })).json();
-    parent = c.id;
+    });
+  } catch (_) {
+    throw new Error('Could not reach the Drive relay. Check your connection.');
   }
-  return parent;
+  if (!r.ok) throw new Error(`Drive relay HTTP ${r.status}`);
+  let j;
+  try {
+    j = await r.json();
+  } catch (_) {
+    throw new Error('The relay did not answer with data. Check it is deployed with access set to Anyone.');
+  }
+  if (j.error) throw new Error(j.error);
+  return j;
 };
-const driveFindFile = async (token, folderId) => {
-  const q = encodeURIComponent(`'${folderId}' in parents and name='${DRIVE_FILE}' and trashed=false`);
-  const j = await (await dfetch(token, `https://www.googleapis.com/drive/v3/files?q=${q}&fields=files(id,name,modifiedTime)`)).json();
-  return j.files && j.files[0] || null;
-};
-const driveUpload = async (token, folderId, blob, existingId) => {
-  const meta = existingId ? {} : {
-    name: DRIVE_FILE,
-    parents: [folderId]
-  };
-  const form = new FormData();
-  form.append('metadata', new Blob([JSON.stringify(meta)], {
-    type: 'application/json'
-  }));
-  form.append('file', blob);
-  const url = existingId ? `https://www.googleapis.com/upload/drive/v3/files/${existingId}?uploadType=multipart` : 'https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart';
-  const j = await (await dfetch(token, url, {
-    method: existingId ? 'PATCH' : 'POST',
-    body: form
-  })).json();
-  return j.id;
-};
-const driveDownloadJson = async (token, id) => (await dfetch(token, `https://www.googleapis.com/drive/v3/files/${id}?alt=media`)).json();
 const APP_ID = 'macro';
 const BACKUP_KEYS = ['profile', 'targets', 'weights', 'favourites', 'drive_last_sync'];
 const isBackupKey = k => BACKUP_KEYS.includes(k) || k.startsWith('log:');
@@ -852,6 +786,126 @@ const applyBackup = data => {
   }
   return keys;
 };
+const driveSync = (() => {
+  const subs = new Set();
+  let timer = null,
+    running = null,
+    again = false,
+    gen = 0;
+  const ls = k => {
+    try {
+      return localStorage.getItem(k);
+    } catch (_) {
+      return null;
+    }
+  };
+  const st = {
+    busy: false,
+    error: null
+  };
+  const emit = () => subs.forEach(fn => {
+    try {
+      fn({
+        ...st
+      });
+    } catch (_) {}
+  });
+  const linked = () => !!relayUrl();
+  const ready = () => linked() && (ls(RELAY_OK_KEY) === '1' || !!S.get('drive_last_sync'));
+  const dirty = () => ls(RELAY_DIRTY_KEY) === '1';
+  const push = async () => {
+    const g = gen;
+    const text = JSON.stringify(backupPayload(), null, 2);
+    const r = await relayCall({
+      action: 'putText',
+      name: DRIVE_FILE,
+      text
+    });
+    const when = new Date().toISOString();
+    S.set('drive_last_sync', when);
+    try {
+      localStorage.setItem(RELAY_OK_KEY, '1');
+      if (gen === g) localStorage.removeItem(RELAY_DIRTY_KEY);
+    } catch (_) {}
+    return r;
+  };
+  const run = async (force = false) => {
+    if (!(force ? linked() : ready())) return null;
+    if (running) {
+      again = true;
+      return running;
+    }
+    clearTimeout(timer);
+    timer = null;
+    st.busy = true;
+    emit();
+    running = (async () => {
+      try {
+        const r = await push();
+        st.error = null;
+        return r;
+      } catch (e) {
+        st.error = e.message;
+        if (force) throw e;
+        return null;
+      } finally {
+        running = null;
+        st.busy = false;
+        emit();
+        if (again) {
+          again = false;
+          if (dirty()) run();
+        }
+      }
+    })();
+    return running;
+  };
+  const mark = key => {
+    if (key === 'drive_last_sync' || !isBackupKey(key)) return;
+    if (!linked()) return;
+    gen++;
+    try {
+      localStorage.setItem(RELAY_DIRTY_KEY, '1');
+    } catch (_) {}
+    if (!ready()) return;
+    clearTimeout(timer);
+    timer = setTimeout(() => run(), 8000);
+  };
+  const flush = () => {
+    if (ready() && (dirty() || ls(RELAY_OK_KEY) !== '1')) run();
+  };
+  document.addEventListener('visibilitychange', flush);
+  window.addEventListener('online', flush);
+  window.addEventListener('pagehide', flush);
+  setTimeout(flush, 3000);
+  return {
+    mark,
+    run,
+    flush,
+    linked,
+    ready,
+    subscribe: fn => {
+      subs.add(fn);
+      fn({
+        ...st
+      });
+      return () => subs.delete(fn);
+    },
+    setReady: () => {
+      try {
+        localStorage.setItem(RELAY_OK_KEY, '1');
+      } catch (_) {}
+    },
+    unlink: () => {
+      clearTimeout(timer);
+      try {
+        [RELAY_URL_KEY, RELAY_OK_KEY, RELAY_DIRTY_KEY].forEach(k => localStorage.removeItem(k));
+      } catch (_) {}
+      st.error = null;
+      emit();
+    }
+  };
+})();
 const ANTHROPIC_URL = "https://api.anthropic.com/v1/messages";
 const anthropicCall = async (messages, apiKey, maxTokens) => {
   if (!apiKey) {
@@ -1284,10 +1338,9 @@ const IconSettings = p => React.createElement("svg", SvgBase(p), React.createEle
 }), React.createElement("path", {
   d: "M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"
 }));
-const IconLoader = p => React.createElement("svg", {
-  ...SvgBase(p),
+const IconLoader = p => React.createElement("svg", _extends({}, SvgBase(p), {
   className: "animate-spin"
-}, React.createElement("line", {
+}), React.createElement("line", {
   x1: "12",
   y1: "2",
   x2: "12",
@@ -1571,7 +1624,7 @@ function ImageLightbox({
       zIndex: 102,
       pointerEvents: 'none'
     }
-  }, "Pinch to zoom · double-tap to reset"), React.createElement("div", {
+  }, "Pinch to zoom \xB7 double-tap to reset"), React.createElement("div", {
     onClick: e => e.stopPropagation(),
     onTouchStart: onTouchStart,
     onTouchMove: onTouchMove,
@@ -1649,7 +1702,7 @@ function ZoomablePreview({
     onClose: () => setOpen(false)
   }));
 }
-const BUILD_VERSION = '2026-09-06y-tdee-note-adaptation';
+const BUILD_VERSION = '2026-10-01a-drive-relay-autosync';
 const SMOOTH_DAYS = 14;
 const TDEE_WINDOW = 21;
 const KCAL_PER_KG = 7400;
@@ -1913,7 +1966,7 @@ function ErrorBanner() {
       padding: 0,
       lineHeight: 1
     }
-  }, "×")));
+  }, "\xD7")));
 }
 function PhotoRecoveryBanner({
   beacon,
@@ -2549,7 +2602,7 @@ function Onboarding({
       color: C.inkSoft,
       marginTop: 10
     }
-  }, "Mifflin-St Jeor BMR × activity, then ", GOAL[data.goal].adj >= 0 ? '+' : '', GOAL[data.goal].adj, " kcal for goal.")), React.createElement("button", {
+  }, "Mifflin-St Jeor BMR \xD7 activity, then ", GOAL[data.goal].adj >= 0 ? '+' : '', GOAL[data.goal].adj, " kcal for goal.")), React.createElement("button", {
     onClick: () => onComplete(data),
     style: primaryBtn
   }, "Start tracking")));
@@ -2630,7 +2683,7 @@ function TodayView({
     onClick: onPrev,
     style: navBtn,
     "aria-label": "Previous day"
-  }, "‹"), React.createElement("button", {
+  }, "\u2039"), React.createElement("button", {
     onClick: onNext,
     disabled: isToday,
     style: {
@@ -2638,7 +2691,7 @@ function TodayView({
       opacity: isToday ? 0.3 : 1
     },
     "aria-label": "Next day"
-  }, "›")), React.createElement("div", {
+  }, "\u203A")), React.createElement("div", {
     style: cardStyle
   }, React.createElement("div", {
     style: {
@@ -2947,7 +3000,7 @@ function FoodRow({
       fontSize: 13,
       lineHeight: '20px'
     }
-  }, "★")), lines.length > 0 && (isList ? React.createElement("ul", {
+  }, "\u2605")), lines.length > 0 && (isList ? React.createElement("ul", {
     style: {
       margin: '4px 0 6px',
       paddingLeft: 16,
@@ -3000,7 +3053,7 @@ function FoodRow({
       color: C.inkMuted
     },
     className: "num"
-  }, "P ", Math.round(entry.protein), "g · C ", Math.round(entry.carbs), "g · F ", Math.round(entry.fat), "g")), React.createElement("button", {
+  }, "P ", Math.round(entry.protein), "g \xB7 C ", Math.round(entry.carbs), "g \xB7 F ", Math.round(entry.fat), "g")), React.createElement("button", {
     onClick: e => {
       e.stopPropagation();
       onEdit();
@@ -3377,7 +3430,7 @@ function SavedRow({
       fontSize: 10,
       fontFamily: fonts.display
     }
-  }, "·"), React.createElement("div", {
+  }, "\xB7"), React.createElement("div", {
     onClick: onPick,
     style: {
       flex: 1,
@@ -3399,7 +3452,7 @@ function SavedRow({
       color: C.inkMuted,
       marginTop: 2
     }
-  }, Math.round(item.calories), " kcal · P ", Math.round(item.protein), " · C ", Math.round(item.carbs), " · F ", Math.round(item.fat))), React.createElement("button", {
+  }, Math.round(item.calories), " kcal \xB7 P ", Math.round(item.protein), " \xB7 C ", Math.round(item.carbs), " \xB7 F ", Math.round(item.fat))), React.createElement("button", {
     onClick: onPick,
     style: {
       ...iconBtnStyle,
@@ -3637,7 +3690,7 @@ function SavedItemEditor({
       marginTop: 0,
       marginBottom: 12
     }
-  }, "← Back to saved meals"), item.imageData && React.createElement(ZoomablePreview, {
+  }, "\u2190 Back to saved meals"), item.imageData && React.createElement(ZoomablePreview, {
     src: item.imageData,
     maxHeight: 180
   }), canRescale && React.createElement(LabelRescaler, {
@@ -5192,12 +5245,12 @@ function PhotoTab({
     className: "num"
   }, label.serving_size_text)), label.per_serving?.calories != null && React.createElement("div", {
     className: "num"
-  }, "Per serving: ", label.per_serving.calories, " kcal · P ", label.per_serving.protein_g ?? '?', "g · C ", label.per_serving.carbs_g ?? '?', "g · F ", label.per_serving.fat_g ?? '?', "g"), label.per_100g?.calories != null && React.createElement("div", {
+  }, "Per serving: ", label.per_serving.calories, " kcal \xB7 P ", label.per_serving.protein_g ?? '?', "g \xB7 C ", label.per_serving.carbs_g ?? '?', "g \xB7 F ", label.per_serving.fat_g ?? '?', "g"), label.per_100g?.calories != null && React.createElement("div", {
     className: "num",
     style: {
       color: C.inkSoft
     }
-  }, "Per 100g: ", label.per_100g.calories, " kcal · P ", label.per_100g.protein_g ?? '?', "g · C ", label.per_100g.carbs_g ?? '?', "g · F ", label.per_100g.fat_g ?? '?', "g")), React.createElement(Field, {
+  }, "Per 100g: ", label.per_100g.calories, " kcal \xB7 P ", label.per_100g.protein_g ?? '?', "g \xB7 C ", label.per_100g.carbs_g ?? '?', "g \xB7 F ", label.per_100g.fat_g ?? '?', "g")), React.createElement(Field, {
     label: "How many grams did you eat?"
   }, React.createElement(NumberInput, {
     value: grams,
@@ -5237,7 +5290,7 @@ function PhotoTab({
       color: C.inkMuted,
       marginTop: 6
     }
-  }, "P ", computed.protein, "g · C ", computed.carbs, "g · F ", computed.fat, "g")), computed && React.createElement("button", {
+  }, "P ", computed.protein, "g \xB7 C ", computed.carbs, "g \xB7 F ", computed.fat, "g")), computed && React.createElement("button", {
     onClick: saveLabel,
     style: primaryBtn
   }, "Add to today"), React.createElement("button", {
@@ -5325,7 +5378,7 @@ function PhotoTab({
       padding: '0 2px',
       cursor: 'pointer'
     }
-  }, "×"))))), result.questions && result.questions.length > 0 && !refineOpen && React.createElement("div", {
+  }, "\xD7"))))), result.questions && result.questions.length > 0 && !refineOpen && React.createElement("div", {
     style: {
       background: '#FFF6E6',
       border: `1px solid #E8D08C`,
@@ -5490,7 +5543,7 @@ function ManualTab({
         marginTop: 0,
         marginBottom: 14
       }
-    }, "← Back to smart estimate"), React.createElement(Field, {
+    }, "\u2190 Back to smart estimate"), React.createElement(Field, {
       label: "Name"
     }, React.createElement(TextInput, {
       value: m.name,
@@ -5950,7 +6003,7 @@ function EditableResult({
     style: {
       color: C.ink
     }
-  }, Math.round(it.calories)), " · P ", Math.round(it.protein), " · C ", Math.round(it.carbs), " · F ", Math.round(it.fat)))))), React.createElement("div", {
+  }, Math.round(it.calories)), " \xB7 P ", Math.round(it.protein), " \xB7 C ", Math.round(it.carbs), " \xB7 F ", Math.round(it.fat)))))), React.createElement("div", {
     style: {
       marginTop: 12,
       paddingTop: 14,
@@ -7344,7 +7397,7 @@ function WeightView({
       }
     }, "Goal: ", React.createElement("b", {
       className: "num"
-    }, goal.toFixed(1), " kg"), " · Current avg: ", React.createElement("b", {
+    }, goal.toFixed(1), " kg"), " \xB7 Current avg: ", React.createElement("b", {
       className: "num"
     }, current.toFixed(1), " kg")), projection !== null && React.createElement("div", {
       style: {
@@ -7470,9 +7523,9 @@ function WeightView({
     }
   }, React.createElement("span", {
     className: "num"
-  }, w.avgIntake.toLocaleString()), " kcal avg · ", React.createElement("span", {
+  }, w.avgIntake.toLocaleString()), " kcal avg \xB7 ", React.createElement("span", {
     className: "num"
-  }, w.weeklyChange >= 0 ? '+' : '', w.weeklyChange.toFixed(2)), " kg/wk · ", React.createElement("span", {
+  }, w.weeklyChange >= 0 ? '+' : '', w.weeklyChange.toFixed(2)), " kg/wk \xB7 ", React.createElement("span", {
     className: "num"
   }, w.daysLogged), "/", React.createElement("span", {
     className: "num"
@@ -7636,7 +7689,7 @@ function HistoryView({
         color: C.inkMuted,
         whiteSpace: 'nowrap'
       }
-    }, m.rows.length, " weigh-in", m.rows.length === 1 ? '' : 's', " · avg ", m.avg.toFixed(1), " kg")
+    }, m.rows.length, " weigh-in", m.rows.length === 1 ? '' : 's', " \xB7 avg ", m.avg.toFixed(1), " kg")
   }, React.createElement("div", {
     style: {
       display: 'flex',
@@ -7709,7 +7762,7 @@ function HistoryView({
         color: C.inkMuted,
         whiteSpace: 'nowrap'
       }
-    }, m.dates.length, " day", m.dates.length === 1 ? '' : 's', " · avg ", m.avg.toLocaleString(), " kcal")
+    }, m.dates.length, " day", m.dates.length === 1 ? '' : 's', " \xB7 avg ", m.avg.toLocaleString(), " kcal")
   }, React.createElement("div", {
     style: {
       display: 'flex',
@@ -7759,14 +7812,14 @@ function HistoryView({
           color: C.inkSoft,
           marginLeft: 10
         }
-      }, " · ", weightMap[date].toFixed(1), " kg")), React.createElement("div", {
+      }, " \xB7 ", weightMap[date].toFixed(1), " kg")), React.createElement("div", {
         className: "num",
         style: {
           fontSize: 12,
           color: C.inkMuted,
           marginTop: 2
         }
-      }, "P ", Math.round(t.p), "g · C ", Math.round(t.c), "g · F ", Math.round(t.f), "g")),
+      }, "P ", Math.round(t.p), "g \xB7 C ", Math.round(t.c), "g \xB7 F ", Math.round(t.f), "g")),
       right: React.createElement("div", {
         style: {
           width: 80,
@@ -7839,7 +7892,7 @@ function HistoryView({
         color: C.inkSoft
       },
       className: "num"
-    }, "P ", Math.round(e.protein), "g · C ", Math.round(e.carbs), "g · F ", Math.round(e.fat), "g")), React.createElement("div", {
+    }, "P ", Math.round(e.protein), "g \xB7 C ", Math.round(e.carbs), "g \xB7 F ", Math.round(e.fat), "g")), React.createElement("div", {
       className: "num",
       style: {
         color: C.inkMuted,
@@ -8027,22 +8080,63 @@ function SettingsView({
   const [keyVisible, setKeyVisible] = useState(false);
   const [confirmReset, setConfirmReset] = useState(false);
   const importRef = useRef();
-  const [driveOn, setDriveOn] = useState(() => !!S.get('drive_connected'));
+  const [driveOn, setDriveOn] = useState(() => driveSync.linked());
   const [driveBusy, setDriveBusy] = useState('');
   const [driveMsg, setDriveMsg] = useState(null);
   const [confirmRestore, setConfirmRestore] = useState(false);
   const [lastSync, setLastSync] = useState(() => S.get('drive_last_sync') || null);
+  const [relayInput, setRelayInput] = useState('');
+  const [auto, setAuto] = useState({
+    busy: false,
+    error: null
+  });
+  const [needsChoice, setNeedsChoice] = useState(() => driveSync.linked() && !driveSync.ready());
+  useEffect(() => driveSync.subscribe(st => {
+    setAuto(st);
+    setLastSync(S.get('drive_last_sync') || null);
+  }), []);
   const driveConnect = async () => {
+    const url = relayInput.trim();
+    const bad = relayLinkProblem(url);
+    if (bad) {
+      setDriveMsg({
+        ok: false,
+        text: bad
+      });
+      return;
+    }
     setDriveBusy('connect');
     setDriveMsg(null);
     try {
-      await driveToken(DRIVE_CLIENT_ID);
-      S.set('drive_connected', true);
+      const j = await relayCall({
+        action: 'ping',
+        name: DRIVE_FILE
+      }, url);
+      localStorage.setItem(RELAY_URL_KEY, url);
       setDriveOn(true);
-      setDriveMsg({
-        ok: true,
-        text: 'Connected. Tap Sync to Drive to save a copy.'
-      });
+      setRelayInput('');
+      const syncedBefore = !!S.get('drive_last_sync');
+      if (syncedBefore || !j.file) {
+        driveSync.setReady();
+        setNeedsChoice(false);
+        await driveSync.run(true);
+        setDriveMsg({
+          ok: true,
+          text: `Linked. Macro now keeps "${j.folder}" up to date on its own.`
+        });
+      } else {
+        setNeedsChoice(true);
+        const when = new Date(j.file.modifiedTime).toLocaleString('en-AU', {
+          day: 'numeric',
+          month: 'short',
+          hour: 'numeric',
+          minute: '2-digit'
+        });
+        setDriveMsg({
+          ok: true,
+          text: `Linked. Drive already has a backup from ${when}. Restore it to this phone, or tap Sync to replace it with this phone's data. Auto-sync starts after either.`
+        });
+      }
     } catch (e) {
       setDriveMsg({
         ok: false,
@@ -8053,35 +8147,22 @@ function SettingsView({
     }
   };
   const driveDisconnect = () => {
-    try {
-      sessionStorage.removeItem('macro_gtoken');
-    } catch (_) {}
-    gis.token = null;
-    gis.exp = 0;
-    S.del('drive_connected');
+    driveSync.unlink();
     setDriveOn(false);
     setDriveMsg(null);
     setConfirmRestore(false);
+    setNeedsChoice(false);
   };
-  const driveSync = async () => {
+  const driveSyncNow = async () => {
     setDriveBusy('sync');
     setDriveMsg(null);
     try {
-      const token = await driveToken(DRIVE_CLIENT_ID);
-      const folderId = await driveFolder(token);
-      const existing = await driveFindFile(token, folderId);
-      const blob = new Blob([JSON.stringify(backupPayload(), null, 2)], {
-        type: 'application/json'
-      });
-      await driveUpload(token, folderId, blob, existing && existing.id);
-      const when = new Date().toISOString();
-      S.set('drive_last_sync', when);
-      setLastSync(when);
-      S.set('drive_connected', true);
-      setDriveOn(true);
+      await driveSync.run(true);
+      setNeedsChoice(false);
+      setLastSync(S.get('drive_last_sync'));
       setDriveMsg({
         ok: true,
-        text: existing ? 'Drive backup updated.' : `Created "${DRIVE_FOLDER}" in your Drive.`
+        text: 'Drive backup updated.'
       });
     } catch (e) {
       setDriveMsg({
@@ -8097,12 +8178,16 @@ function SettingsView({
     setDriveMsg(null);
     setConfirmRestore(false);
     try {
-      const token = await driveToken(DRIVE_CLIENT_ID);
-      const folderId = await driveFolder(token);
-      const existing = await driveFindFile(token, folderId);
-      if (!existing) throw new Error(`No ${DRIVE_FILE} in your Drive yet. Sync from a device that has your data first.`);
-      const data = await driveDownloadJson(token, existing.id);
-      const n = applyBackup(data);
+      const j = await relayCall({
+        action: 'getText',
+        name: DRIVE_FILE
+      });
+      if (j.text == null) throw new Error(`No ${DRIVE_FILE} in your Drive yet. Sync from a device that has your data first.`);
+      const n = applyBackup(JSON.parse(j.text));
+      driveSync.setReady();
+      try {
+        localStorage.removeItem(RELAY_DIRTY_KEY);
+      } catch (_) {}
       alert(`Restored ${n} items from Drive. Reloading...`);
       window.location.reload();
     } catch (e) {
@@ -8380,7 +8465,7 @@ function SettingsView({
       marginTop: 4,
       marginBottom: 16
     }
-  }, "BMR ", calc.bmr, " × activity = TDEE ", calc.tdee, ", then ", GOAL[p.goal].adj >= 0 ? '+' : '', GOAL[p.goal].adj, " for goal · Protein at 1.6g/kg"), React.createElement(MacroPercents, {
+  }, "BMR ", calc.bmr, " \xD7 activity = TDEE ", calc.tdee, ", then ", GOAL[p.goal].adj >= 0 ? '+' : '', GOAL[p.goal].adj, " for goal \xB7 Protein at 1.6g/kg"), React.createElement(MacroPercents, {
     calories: calc.calories,
     protein: calc.protein,
     carbs: calc.carbs,
@@ -8460,13 +8545,32 @@ function SettingsView({
       marginTop: 0,
       marginBottom: 12
     }
-  }, "Keeps a copy of your tracker in a folder called ", React.createElement("b", {
+  }, "Keeps a copy of your tracker in ", React.createElement("b", {
     style: {
       color: C.inkMuted
     }
-  }, DRIVE_FOLDER), " in your Drive, so a new phone can be set up from it. Macro can only see files it created itself, never the rest of your Drive. Your API key is never included."), !driveOn ? React.createElement("button", {
+  }, DRIVE_FOLDER), " in your Drive, updated automatically a few seconds after each change, so a new phone can be set up from it. It goes through the App Data relay, a small script in your own Google account, so there is no Google sign-in on the phone and nothing expires. The same link works in Receipts, and unlinking here unlinks both. Your API key is never included."), !driveOn ? React.createElement("div", null, React.createElement("input", {
+    value: relayInput,
+    onChange: e => setRelayInput(e.target.value),
+    placeholder: "Paste the relay link (\u2026/exec?k=\u2026)",
+    autoCapitalize: "off",
+    autoCorrect: "off",
+    spellCheck: false,
+    style: {
+      width: '100%',
+      padding: '10px 12px',
+      borderRadius: 8,
+      border: `1px solid ${C.line}`,
+      fontSize: 13,
+      marginBottom: 10,
+      background: C.surface,
+      color: C.ink,
+      fontFamily: 'monospace',
+      boxSizing: 'border-box'
+    }
+  }), React.createElement("button", {
     onClick: driveConnect,
-    disabled: !!driveBusy,
+    disabled: !!driveBusy || !relayInput.trim(),
     style: {
       ...secondaryBtn,
       marginTop: 0,
@@ -8474,7 +8578,7 @@ function SettingsView({
       alignItems: 'center',
       justifyContent: 'center',
       gap: 10,
-      opacity: driveBusy ? 0.5 : 1
+      opacity: driveBusy || !relayInput.trim() ? 0.5 : 1
     }
   }, React.createElement("svg", {
     width: "17",
@@ -8493,7 +8597,7 @@ function SettingsView({
   }), React.createElement("path", {
     fill: "#EA4335",
     d: "M24 10.8c3.3 0 6.2 1.1 8.5 3.3l6.3-6.3C35 4.3 30 2 24 2 15.4 2 7.9 7 4.3 14.2l7.3 5.7c1.7-5.2 6.6-9.1 12.4-9.1z"
-  })), driveBusy === 'connect' ? 'Connecting...' : 'Connect Google Drive') : React.createElement("div", null, React.createElement("div", {
+  })), driveBusy === 'connect' ? 'Linking...' : 'Link Google Drive')) : React.createElement("div", null, React.createElement("div", {
     style: {
       display: 'flex',
       alignItems: 'center',
@@ -8505,7 +8609,7 @@ function SettingsView({
       width: 7,
       height: 7,
       borderRadius: 4,
-      background: C.green
+      background: auto.error ? C.red : needsChoice ? C.inkSoft : C.green
     }
   }), React.createElement("span", {
     style: {
@@ -8513,7 +8617,7 @@ function SettingsView({
       fontSize: 13,
       color: C.ink
     }
-  }, "Connected"), React.createElement("button", {
+  }, auto.busy ? 'Syncing...' : needsChoice ? 'Linked, waiting for Restore or Sync' : 'Auto-sync on'), React.createElement("button", {
     onClick: driveDisconnect,
     style: {
       ...iconBtnStyle,
@@ -8521,21 +8625,21 @@ function SettingsView({
       padding: '6px 12px',
       fontSize: 12
     }
-  }, "Disconnect")), React.createElement("div", {
+  }, "Unlink")), React.createElement("div", {
     style: {
       display: 'flex',
       gap: 8
     }
   }, React.createElement("button", {
-    onClick: driveSync,
-    disabled: !!driveBusy,
+    onClick: driveSyncNow,
+    disabled: !!driveBusy || auto.busy,
     style: {
       ...secondaryBtn,
       marginTop: 0,
       flex: 1,
-      opacity: driveBusy ? 0.5 : 1
+      opacity: driveBusy || auto.busy ? 0.5 : 1
     }
-  }, driveBusy === 'sync' ? 'Syncing...' : 'Sync to Drive'), !confirmRestore ? React.createElement("button", {
+  }, driveBusy === 'sync' ? 'Syncing...' : 'Sync now'), !confirmRestore ? React.createElement("button", {
     onClick: () => setConfirmRestore(true),
     disabled: !!driveBusy,
     style: {
@@ -8569,7 +8673,14 @@ function SettingsView({
       font: 'inherit',
       cursor: 'pointer'
     }
-  }, "cancel"), "."), lastSync && !driveMsg && React.createElement("div", {
+  }, "cancel"), "."), auto.error && !driveMsg && React.createElement("div", {
+    style: {
+      fontSize: 12,
+      color: C.red,
+      marginTop: 10,
+      lineHeight: 1.45
+    }
+  }, "Last auto-sync failed: ", auto.error, ". It retries on the next change or when you reopen the app."), lastSync && !driveMsg && React.createElement("div", {
     style: {
       fontSize: 11,
       color: C.inkSoft,
@@ -9075,7 +9186,7 @@ function Collapsible({
     style: {
       transform: open ? 'rotate(90deg)' : 'none'
     }
-  }, "›"), title), right), open && children);
+  }, "\u203A"), title), right), open && children);
 }
 function InfoNote({
   summary,

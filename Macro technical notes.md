@@ -41,21 +41,27 @@ Three external references remain, all deliberate:
 
 - **Google Fonts** (Fraunces, IBM Plex Sans) via `<link>`. Degrades to the fallback stack if it fails.
 - **`heic2any@0.0.4` from jsdelivr**, loaded lazily and only when a HEIC file is picked. It is version-pinned, which is what makes it safe: the June incident was an *unpinned* dependency, not a CDN as such. Keep the pin.
-- **`accounts.google.com/gsi/client`**, loaded only when Drive sync is tapped. Google will not issue a token any other way, and it is never in the boot path.
+- **The App Data relay** (`script.google.com`), called only for Drive sync and never in the boot path. The Google sign-in script is gone.
 
 ## Google Drive sync
 
-One file, at `App Data/Macros/macro.json`. `DRIVE_PATH` holds that as an array and `driveFolder` walks it from the Drive root, creating anything missing. A shared "App Data" folder holding one folder per app is the standing convention for Julian's apps.
+One file, at `App Data/Macros/macro.json`, written through the **App Data relay**: a Google Apps Script web app in Julian's own account (`drive-relay/Code.gs`). The app POSTs `{app, action, ...}` as plain text (a simple request, so no CORS preflight) to the relay link, which ends `/exec?k=<key>`. The relay decides the folder from the app name and only touches `App Data/<app>`.
 
-The catch to remember: every app must reuse THIS OAuth client ID. `drive.file` lets a client see only files it created, so an app given its own client would be blind to the shared `App Data` folder and would silently create a duplicate beside it. All of Julian's apps are served from `https://jules1342.github.io`, so one client ID legitimately covers them all. Macro's whole state is a single localStorage object, so unlike Receipts there are no images to reconcile: sync overwrites the file, restore replaces the device. Restore sits behind a two-tap confirm. The API key and the client ID are stripped from the payload.
+Why a relay (2026-10-01): the previous in-app Google sign-in (GIS token model, `drive.file`) cannot work in the background. A browser-only app gets an access token for an hour at most, has no refresh token, and needs a user tap to open Google's pop-up for a new one. The token was also kept in sessionStorage, so every restart of the PWA asked for sign-in again. A refresh token needs a server holding a client secret; Apps Script is that server, free and inside Julian's account, and it needs no token from the phone at all.
 
-The client ID is compiled into `macro.html` as `DRIVE_CLIENT_ID`, so there is nothing to paste on the phone: Settings shows a Connect Google Drive button and the ordinary Google account picker. Client IDs are public by design, the way every Sign in with Google app ships one in its JavaScript, and the `drive.file` scope limits the app to files it created itself. The origin restriction is what protects it, which is why the site address is fixed. Setup steps are in `README.md`.
+The relay link lives in localStorage as `app_data_relay`, shared with Receipts (same origin, same storage), so linking in either app links both. It is device-only: not in `BACKUP_KEYS`, never exported, never committed.
+
+Auto-sync (`driveSync` in `macro.html`): `S.set` and `S.del` call `driveSync.mark(key)`. A change to a backed-up key (other than `drive_last_sync`) sets `drive_dirty` and debounces a push by 8 seconds. Dirty pushes also fire on `visibilitychange`, `pagehide`, `online`, and 3 seconds after open, so a push Android froze mid-flight is retried. A generation counter keeps a change made during a push from being marked clean. One push runs at a time.
+
+The new-phone guard: a device only auto-syncs once it is known to hold the real data, meaning `drive_ready` is set or it has a `drive_last_sync` (it synced before, or restored, since the backup carries that key). Linking a device that has neither while Drive already has `macro.json` shows a choice: Restore or Sync now. Without this, an empty new phone would overwrite the backup a few seconds after linking.
+
+Sync still overwrites the file and restore still replaces the device. Two phones in daily use would clobber each other; that has never been the setup.
 
 Every backup carries `__app: 'macro'`, and both the Drive restore and the file import refuse a payload stamped for a different app, or one with no Macro data in it, before writing anything. Backups made before stamping have no marker and are still accepted, so the pre-migration Netlify export can still be imported. The `__` metadata keys are never written to storage, and the API key is stripped on the way out and ignored on the way in.
 
-This guard matters because the apps share one OAuth client and one `App Data` parent. The Drive queries are already scoped to `App Data/Macros`, so Macro cannot even see another app's folder; the stamp is the second line, for a file picked by hand.
+The relay was tested against a mock of the Apps Script (link, auto-push after a change, retry on reopen, new-phone restore), not against the live script, which needs Julian's account.
 
-The code is ported from Receipts and **has never completed a real round trip** in either app. It needs Julian's Google account and the live URL, so the first run on the phone is the real test.
+Known trap, not fixed: Settings, Reset calls `localStorage.clear()`, which also wipes Receipts' settings and the shared relay link, because both apps share the origin.
 
 ## The model
 
