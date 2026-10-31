@@ -65,7 +65,7 @@ Reset (`S.wipe`) clears storage but puts the relay link back, so a reset device 
 
 ## The model
 
-Picked per device in Settings, AI model, stored as `ai_model` (outside `BACKUP_KEYS`, so it never syncs). Default `claude-opus-5-5`; also `claude-sonnet-5-5`, `claude-opus-5` and `claude-haiku-5-5`. `currentModel()` falls back to the default for any unknown value. Adaptive thinking is left on (the default on all four) and `output_config.effort` is `medium` (Opus 5.5 cannot turn thinking off; `low` is the floor). Do not send `temperature`, `top_p` or `top_k`: Sonnet 5.5 returns a 400 for them.
+Picked per device in Settings, AI model, stored as `ai_model` (outside `BACKUP_KEYS`, so it never syncs). Default `claude-opus-5-5`; also `claude-sonnet-5-5` and `claude-haiku-5-5`. Only current-generation models are offered. `currentModel()` falls back to the default for any value no longer in the list, so a phone that had picked a retired model moves to the default by itself. Adaptive thinking is left on (the default on all four) and `output_config.effort` is `medium` (Opus 5.5 cannot turn thinking off; `low` is the floor). Do not send `temperature`, `top_p` or `top_k`: Sonnet 5.5 returns a 400 for them.
 
 Three things follow from that and are easy to break:
 

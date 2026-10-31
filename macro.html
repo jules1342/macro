@@ -554,7 +554,6 @@
     const AI_MODELS = [
       { id: 'claude-opus-5-5', label: 'Opus 5.5', note: 'Most careful estimates. The default.' },
       { id: 'claude-sonnet-5-5', label: 'Sonnet 5.5', note: 'Faster, may be less careful on meal photos.' },
-      { id: 'claude-opus-5', label: 'Opus 5', note: 'The previous model, for comparison.' },
       { id: 'claude-haiku-5-5', label: 'Haiku 5.5', note: 'Fastest and cheapest, least careful.' },
     ];
     const DEFAULT_MODEL = 'claude-opus-5-5';
@@ -1099,7 +1098,7 @@ Return ONLY a JSON object (no markdown, no preamble):
     // while the camera intent is foregrounded), the tab silently reloads.
     // We use localStorage (not sessionStorage) because a full process kill
     // can wipe sessionStorage but leaves localStorage intact.
-    const BUILD_VERSION = '2026-11-01a-opus-medium';
+    const BUILD_VERSION = '2026-11-01b-latest-models';
     // Window for the rolling-average line on the intake charts, in days.
     const SMOOTH_DAYS = 14;
     // Trailing window for each point on the maintenance-over-time chart. The
