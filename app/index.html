@@ -921,13 +921,13 @@ try {
 const ANTHROPIC_URL = "https://api.anthropic.com/v1/messages";
 const MODEL_KEY = 'ai_model';
 const AI_MODELS = [{
-  id: 'claude-sonnet-5-5',
-  label: 'Sonnet 5.5',
-  note: 'Fast. The default.'
-}, {
   id: 'claude-opus-5-5',
   label: 'Opus 5.5',
-  note: 'Slower, most careful estimates.'
+  note: 'Most careful estimates. The default.'
+}, {
+  id: 'claude-sonnet-5-5',
+  label: 'Sonnet 5.5',
+  note: 'Faster, may be less careful on meal photos.'
 }, {
   id: 'claude-opus-5',
   label: 'Opus 5',
@@ -937,7 +937,7 @@ const AI_MODELS = [{
   label: 'Haiku 5.5',
   note: 'Fastest and cheapest, least careful.'
 }];
-const DEFAULT_MODEL = 'claude-sonnet-5-5';
+const DEFAULT_MODEL = 'claude-opus-5-5';
 const currentModel = () => {
   const m = S.get(MODEL_KEY);
   return AI_MODELS.some(x => x.id === m) ? m : DEFAULT_MODEL;
@@ -962,7 +962,7 @@ const anthropicCall = async (messages, apiKey, maxTokens) => {
         model: currentModel(),
         max_tokens: maxTokens,
         output_config: {
-          effort: "low"
+          effort: "medium"
         },
         messages
       })
@@ -1035,14 +1035,14 @@ const callVision = async (fileOrDataUrl, prompt, apiKey) => {
       type: "text",
       text: prompt
     }]
-  }], apiKey, 5000);
+  }], apiKey, 12000);
   return parseJsonReply(text);
 };
 const callText = async (prompt, apiKey) => {
   const text = await anthropicCall([{
     role: "user",
     content: prompt
-  }], apiKey, 4000);
+  }], apiKey, 10000);
   return parseJsonReply(text);
 };
 const normaliseItems = raw => {
@@ -1737,7 +1737,7 @@ function ZoomablePreview({
     onClose: () => setOpen(false)
   }));
 }
-const BUILD_VERSION = '2026-10-31a-model-picker';
+const BUILD_VERSION = '2026-11-01a-opus-medium';
 const SMOOTH_DAYS = 14;
 const TDEE_WINDOW = 21;
 const KCAL_PER_KG = 7400;

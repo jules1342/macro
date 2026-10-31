@@ -548,17 +548,16 @@
     const ANTHROPIC_URL = "https://api.anthropic.com/v1/messages";
 
     // The model is a per-device setting (Settings, AI model), stored outside
-    // the backup whitelist so it never rides into Drive. Sonnet 5.5 is the
-    // default for speed; Opus 5 was the August choice for estimate accuracy and
-    // stays available. All four accept output_config.effort and think adaptively.
+    // the backup whitelist so it never rides into Drive. Opus 5.5 at medium
+    // effort is the default, for estimate accuracy (Julian, 2026-11-01). All four accept output_config.effort and think adaptively.
     const MODEL_KEY = 'ai_model';
     const AI_MODELS = [
-      { id: 'claude-sonnet-5-5', label: 'Sonnet 5.5', note: 'Fast. The default.' },
-      { id: 'claude-opus-5-5', label: 'Opus 5.5', note: 'Slower, most careful estimates.' },
+      { id: 'claude-opus-5-5', label: 'Opus 5.5', note: 'Most careful estimates. The default.' },
+      { id: 'claude-sonnet-5-5', label: 'Sonnet 5.5', note: 'Faster, may be less careful on meal photos.' },
       { id: 'claude-opus-5', label: 'Opus 5', note: 'The previous model, for comparison.' },
       { id: 'claude-haiku-5-5', label: 'Haiku 5.5', note: 'Fastest and cheapest, least careful.' },
     ];
-    const DEFAULT_MODEL = 'claude-sonnet-5-5';
+    const DEFAULT_MODEL = 'claude-opus-5-5';
     const currentModel = () => {
       const m = S.get(MODEL_KEY);
       return AI_MODELS.some(x => x.id === m) ? m : DEFAULT_MODEL;
@@ -580,12 +579,12 @@
           },
           // The model thinks by default, and max_tokens caps thinking + reply together,
           // so the callers' token budgets are sized for both. Adaptive thinking is
-          // what fixes the macro arithmetic; low effort keeps logging quick. If
+          // what fixes the macro arithmetic; medium effort trades a little speed for care. If
           // estimates drift, raise effort before changing anything else.
           body: JSON.stringify({
             model: currentModel(),
             max_tokens: maxTokens,
-            output_config: { effort: "low" },
+            output_config: { effort: "medium" },
             messages
           })
         });
@@ -636,12 +635,12 @@
           { type: "image", source: { type: "base64", media_type: parts.mediaType, data: parts.data } },
           { type: "text", text: prompt }
         ]
-      }], apiKey, 5000);
+      }], apiKey, 12000);
       return parseJsonReply(text);
     };
 
     const callText = async (prompt, apiKey) => {
-      const text = await anthropicCall([{ role: "user", content: prompt }], apiKey, 4000);
+      const text = await anthropicCall([{ role: "user", content: prompt }], apiKey, 10000);
       return parseJsonReply(text);
     };
 
@@ -1100,7 +1099,7 @@ Return ONLY a JSON object (no markdown, no preamble):
     // while the camera intent is foregrounded), the tab silently reloads.
     // We use localStorage (not sessionStorage) because a full process kill
     // can wipe sessionStorage but leaves localStorage intact.
-    const BUILD_VERSION = '2026-10-31a-model-picker';
+    const BUILD_VERSION = '2026-11-01a-opus-medium';
     // Window for the rolling-average line on the intake charts, in days.
     const SMOOTH_DAYS = 14;
     // Trailing window for each point on the maintenance-over-time chart. The
