@@ -554,9 +554,22 @@
     const AI_MODELS = [
       { id: 'claude-opus-5-5', label: 'Opus 5.5', note: 'Most careful estimates. The default.' },
       { id: 'claude-sonnet-5-5', label: 'Sonnet 5.5', note: 'Faster, may be less careful on meal photos.' },
-      { id: 'claude-haiku-5-5', label: 'Haiku 5.5', note: 'Fastest and cheapest, least careful.' },
     ];
     const DEFAULT_MODEL = 'claude-opus-5-5';
+    // Effort is the thinking dial. max_tokens caps thinking plus reply, so the
+    // callers' budgets (sized for medium) scale with it, or high effort would
+    // cut the JSON short.
+    const EFFORT_KEY = 'ai_effort';
+    const AI_EFFORTS = [
+      { id: 'low', label: 'Low', note: 'Quickest. Least checking of the arithmetic.', scale: 0.5 },
+      { id: 'medium', label: 'Medium', note: 'The default. Balances speed and care.', scale: 1 },
+      { id: 'high', label: 'High', note: 'Slowest. Most careful on mixed plates.', scale: 2 },
+    ];
+    const DEFAULT_EFFORT = 'medium';
+    const currentEffort = () => {
+      const e = S.get(EFFORT_KEY);
+      return AI_EFFORTS.some(x => x.id === e) ? e : DEFAULT_EFFORT;
+    };
     const currentModel = () => {
       const m = S.get(MODEL_KEY);
       return AI_MODELS.some(x => x.id === m) ? m : DEFAULT_MODEL;
@@ -582,8 +595,8 @@
           // estimates drift, raise effort before changing anything else.
           body: JSON.stringify({
             model: currentModel(),
-            max_tokens: maxTokens,
-            output_config: { effort: "medium" },
+            max_tokens: Math.round(maxTokens * AI_EFFORTS.find(x => x.id === currentEffort()).scale),
+            output_config: { effort: currentEffort() },
             messages
           })
         });
@@ -1098,7 +1111,7 @@ Return ONLY a JSON object (no markdown, no preamble):
     // while the camera intent is foregrounded), the tab silently reloads.
     // We use localStorage (not sessionStorage) because a full process kill
     // can wipe sessionStorage but leaves localStorage intact.
-    const BUILD_VERSION = '2026-11-01b-latest-models';
+    const BUILD_VERSION = '2026-11-01c-effort-picker';
     // Window for the rolling-average line on the intake charts, in days.
     const SMOOTH_DAYS = 14;
     // Trailing window for each point on the maintenance-over-time chart. The
@@ -4888,6 +4901,8 @@ Return ONLY a JSON object (no markdown, no preamble):
       const [keyVisible, setKeyVisible] = useState(false);
       const [aiModel, setAiModel] = useState(currentModel);
       const pickModel = (id) => { setAiModel(id); S.set(MODEL_KEY, id); };
+      const [aiEffort, setAiEffort] = useState(currentEffort);
+      const pickEffort = (id) => { setAiEffort(id); S.set(EFFORT_KEY, id); };
       const [confirmReset, setConfirmReset] = useState(false);
       const importRef = useRef();
       // Google Drive sync, through the App Data relay (see driveSync).
@@ -5027,6 +5042,11 @@ Return ONLY a JSON object (no markdown, no preamble):
             <Pills value={aiModel} onChange={pickModel} options={AI_MODELS.map(m => ({ v: m.id, l: m.label }))}/>
             <div style={{ fontSize: 12, color: C.inkMuted, marginTop: 10, lineHeight: 1.45 }}>
               {(AI_MODELS.find(m => m.id === aiModel) || AI_MODELS[0]).note} Used for photos, labels, descriptions and corrections. Saved on this phone only.
+            </div>
+            <div style={{ fontSize: 11, color: C.inkSoft, textTransform: 'uppercase', letterSpacing: '0.06em', margin: '16px 0 8px' }}>Reasoning effort</div>
+            <Pills value={aiEffort} onChange={pickEffort} options={AI_EFFORTS.map(x => ({ v: x.id, l: x.label }))}/>
+            <div style={{ fontSize: 12, color: C.inkMuted, marginTop: 10, lineHeight: 1.45 }}>
+              {(AI_EFFORTS.find(x => x.id === aiEffort) || AI_EFFORTS[1]).note}
             </div>
           </div>
 

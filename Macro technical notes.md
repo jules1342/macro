@@ -65,11 +65,11 @@ Reset (`S.wipe`) clears storage but puts the relay link back, so a reset device 
 
 ## The model
 
-Picked per device in Settings, AI model, stored as `ai_model` (outside `BACKUP_KEYS`, so it never syncs). Default `claude-opus-5-5`; also `claude-sonnet-5-5` and `claude-haiku-5-5`. Only current-generation models are offered. `currentModel()` falls back to the default for any value no longer in the list, so a phone that had picked a retired model moves to the default by itself. Adaptive thinking is left on (the default on all four) and `output_config.effort` is `medium` (Opus 5.5 cannot turn thinking off; `low` is the floor). Do not send `temperature`, `top_p` or `top_k`: Sonnet 5.5 returns a 400 for them.
+Picked per device in Settings, AI model, stored as `ai_model` (outside `BACKUP_KEYS`, so it never syncs). Default `claude-opus-5-5`; also `claude-sonnet-5-5`. Only current-generation models are offered. `currentModel()` falls back to the default for any value no longer in the list, so a phone that had picked a retired model moves to the default by itself. Adaptive thinking is left on (the default on all four) and `output_config.effort` is picked in the same card, stored as `ai_effort`: low, medium (default) or high. Opus 5.5 cannot turn thinking off; `low` is the floor. Do not send `temperature`, `top_p` or `top_k`: Sonnet 5.5 returns a 400 for them.
 
 Three things follow from that and are easy to break:
 
-- **`max_tokens` covers thinking as well as the reply.** The budgets are 12000 for vision calls and 10000 for text, raised from 5000 and 4000 when effort went from low to medium. They look generous for a small JSON payload because most of it is headroom for thinking. Cutting them back truncates answers mid-JSON.
+- **`max_tokens` covers thinking as well as the reply.** The base budgets are 12000 for vision calls and 10000 for text, sized for medium, and `anthropicCall` scales them by the effort (x0.5 low, x2 high). They look generous for a small JSON payload because most of it is headroom for thinking. Cutting them back truncates answers mid-JSON.
 - **Thinking is the point, not a side effect.** It is what makes the model do the per-100g arithmetic properly instead of recalling a whole-item figure. Turning it off would undo the accuracy work.
 - **`effort` is the latency dial.** `medium` since 2026-11-01, Julian's call for accuracy over speed (it was `low`). Raise it before touching prompts if estimates drift; lower it to `low` if logging feels too slow.
 
