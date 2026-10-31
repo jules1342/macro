@@ -172,7 +172,15 @@
         }
         return out;
       },
-      wipe: () => localStorage.clear(),
+      // Keeps the Drive relay link, which Receipts shares on this origin. After
+      // a reset the device is linked but not ready, so it never auto-pushes the
+      // empty state over the backup; Settings offers Restore instead.
+      wipe: () => {
+        let relay = null;
+        try { relay = localStorage.getItem('app_data_relay'); } catch (_) {}
+        localStorage.clear();
+        if (relay) try { localStorage.setItem('app_data_relay', relay); } catch (_) {}
+      },
     };
 
     // ====================== CALCULATOR ======================
@@ -533,7 +541,28 @@
       };
     })();
 
+    // Ask Chrome to mark this origin's storage persistent, so it is not evicted
+    // under storage pressure along with the tracker and the relay link.
+    try { if (navigator.storage && navigator.storage.persist) navigator.storage.persist().catch(() => {}); } catch (_) {}
+
     const ANTHROPIC_URL = "https://api.anthropic.com/v1/messages";
+
+    // The model is a per-device setting (Settings, AI model), stored outside
+    // the backup whitelist so it never rides into Drive. Sonnet 5.5 is the
+    // default for speed; Opus 5 was the August choice for estimate accuracy and
+    // stays available. All four accept output_config.effort and think adaptively.
+    const MODEL_KEY = 'ai_model';
+    const AI_MODELS = [
+      { id: 'claude-sonnet-5-5', label: 'Sonnet 5.5', note: 'Fast. The default.' },
+      { id: 'claude-opus-5-5', label: 'Opus 5.5', note: 'Slower, most careful estimates.' },
+      { id: 'claude-opus-5', label: 'Opus 5', note: 'The previous model, for comparison.' },
+      { id: 'claude-haiku-5-5', label: 'Haiku 5.5', note: 'Fastest and cheapest, least careful.' },
+    ];
+    const DEFAULT_MODEL = 'claude-sonnet-5-5';
+    const currentModel = () => {
+      const m = S.get(MODEL_KEY);
+      return AI_MODELS.some(x => x.id === m) ? m : DEFAULT_MODEL;
+    };
 
     // Single point for Anthropic requests. Throws errors tagged with a `kind`
     // so failures can be told apart: network vs HTTP status vs bad response.
@@ -549,12 +578,12 @@
             "anthropic-version": "2023-06-01",
             "anthropic-dangerous-direct-browser-access": "true"
           },
-          // Opus 5 thinks by default, and max_tokens caps thinking + reply together,
+          // The model thinks by default, and max_tokens caps thinking + reply together,
           // so the callers' token budgets are sized for both. Adaptive thinking is
           // what fixes the macro arithmetic; low effort keeps logging quick. If
           // estimates drift, raise effort before changing anything else.
           body: JSON.stringify({
-            model: "claude-opus-5",
+            model: currentModel(),
             max_tokens: maxTokens,
             output_config: { effort: "low" },
             messages
@@ -1071,7 +1100,7 @@ Return ONLY a JSON object (no markdown, no preamble):
     // while the camera intent is foregrounded), the tab silently reloads.
     // We use localStorage (not sessionStorage) because a full process kill
     // can wipe sessionStorage but leaves localStorage intact.
-    const BUILD_VERSION = '2026-10-01a-drive-relay-autosync';
+    const BUILD_VERSION = '2026-10-31a-model-picker';
     // Window for the rolling-average line on the intake charts, in days.
     const SMOOTH_DAYS = 14;
     // Trailing window for each point on the maintenance-over-time chart. The
@@ -4859,6 +4888,8 @@ Return ONLY a JSON object (no markdown, no preamble):
       const [mode, setMode] = useState(targets?.mode === 'manual' ? 'manual' : 'calculated');
       const [keyInput, setKeyInput] = useState('');
       const [keyVisible, setKeyVisible] = useState(false);
+      const [aiModel, setAiModel] = useState(currentModel);
+      const pickModel = (id) => { setAiModel(id); S.set(MODEL_KEY, id); };
       const [confirmReset, setConfirmReset] = useState(false);
       const importRef = useRef();
       // Google Drive sync, through the App Data relay (see driveSync).
@@ -4993,6 +5024,14 @@ Return ONLY a JSON object (no markdown, no preamble):
             )}
           </div>
 
+          <SectionHeader>AI model</SectionHeader>
+          <div style={cardStyle}>
+            <Pills value={aiModel} onChange={pickModel} options={AI_MODELS.map(m => ({ v: m.id, l: m.label }))}/>
+            <div style={{ fontSize: 12, color: C.inkMuted, marginTop: 10, lineHeight: 1.45 }}>
+              {(AI_MODELS.find(m => m.id === aiModel) || AI_MODELS[0]).note} Used for photos, labels, descriptions and corrections. Saved on this phone only.
+            </div>
+          </div>
+
           <SectionHeader>Profile</SectionHeader>
           <div style={cardStyle}>
             <Field label="Your name">
@@ -5082,6 +5121,9 @@ Return ONLY a JSON object (no markdown, no preamble):
             </InfoNote>
             {!driveOn ? (
               <div>
+                <div style={{ fontSize: 12, color: C.inkMuted, marginBottom: 10, lineHeight: 1.5 }}>
+                  One-time setup, about 5 minutes on a computer: open <a href="https://script.google.com" target="_blank" rel="noopener" style={{ color: C.accent }}>script.google.com</a>, make a new project, paste in <a href="https://raw.githubusercontent.com/jules1342/macro/main/drive-relay/Code.gs" target="_blank" rel="noopener" style={{ color: C.accent }}>the relay script</a>, deploy it as a Web app (Execute as Me, access Anyone), run <b>setup</b>, then paste the link it logs here. After that you never sign in again.
+                </div>
                 <input value={relayInput} onChange={e => setRelayInput(e.target.value)}
                   placeholder="Paste the relay link (…/exec?k=…)" autoCapitalize="off" autoCorrect="off" spellCheck={false}
                   style={{ width: '100%', padding: '10px 12px', borderRadius: 8, border: `1px solid ${C.line}`, fontSize: 13, marginBottom: 10, background: C.surface, color: C.ink, fontFamily: 'monospace', boxSizing: 'border-box' }}/>
@@ -5519,7 +5561,7 @@ Return ONLY a JSON object (no markdown, no preamble):
             <div style={{ fontSize: 12, color: C.inkSoft, marginTop: 4 }}>
               If reloading doesn't help, this clears the app's saved data on this device as a last resort. Your logged history will be lost.
             </div>
-            <button onClick={() => { if (window.confirm('Clear all saved data on this device? This cannot be undone.')) { try { localStorage.clear(); } catch (_) {} window.location.reload(); } }}
+            <button onClick={() => { if (window.confirm('Clear all saved data on this device? This cannot be undone.')) { try { S.wipe(); } catch (_) {} window.location.reload(); } }}
               style={{ ...btn, background: 'transparent', color: C.red, border: `1px solid ${C.red}` }}>
               Clear saved data and reload
             </button>

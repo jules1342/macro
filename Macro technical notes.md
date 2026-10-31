@@ -61,11 +61,11 @@ Every backup carries `__app: 'macro'`, and both the Drive restore and the file i
 
 The relay was tested against a mock of the Apps Script (link, auto-push after a change, retry on reopen, new-phone restore), not against the live script, which needs Julian's account.
 
-Known trap, not fixed: Settings, Reset calls `localStorage.clear()`, which also wipes Receipts' settings and the shared relay link, because both apps share the origin.
+Reset (`S.wipe`) clears storage but puts the relay link back, so a reset device stays linked but not ready: it never auto-pushes its empty state, and Settings offers Restore. It still wipes Receipts' other settings, because both apps share the origin. On boot the app calls `navigator.storage.persist()` so Chrome does not evict the store under storage pressure.
 
 ## The model
 
-`claude-opus-5`, with adaptive thinking left on (its default) and `output_config.effort` set to `low`.
+Picked per device in Settings, AI model, stored as `ai_model` (outside `BACKUP_KEYS`, so it never syncs). Default `claude-sonnet-5-5`; also `claude-opus-5-5`, `claude-opus-5` and `claude-haiku-5-5`. `currentModel()` falls back to the default for any unknown value. Adaptive thinking is left on (the default on all four) and `output_config.effort` is `low`. Do not send `temperature`, `top_p` or `top_k`: Sonnet 5.5 returns a 400 for them.
 
 Three things follow from that and are easy to break:
 

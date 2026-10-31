@@ -31,7 +31,7 @@ To ship a change: edit `macro.html`, bump `BUILD_VERSION`, build, then commit an
 Open the site in Chrome on Android, tap the menu, Add to Home screen. It opens full screen and works offline.
 
 ## Claude API key
-Settings, paste the key from console.anthropic.com. It stays in the browser storage on the phone, and calls go straight to Anthropic. It is never included in an export or a Drive sync. Extraction uses `claude-opus-5` at low effort.
+Settings, paste the key from console.anthropic.com. It stays in the browser storage on the phone, and calls go straight to Anthropic. It is never included in an export or a Drive sync. The model is picked in Settings, AI model (Sonnet 5.5 by default, Opus 5.5, Opus 5 or Haiku 5.5), always at low effort. The choice is saved on the phone only.
 
 ## Google Drive sync (optional, one-time setup, about 5 minutes)
 

@@ -481,7 +481,16 @@ const S = {
     }
     return out;
   },
-  wipe: () => localStorage.clear()
+  wipe: () => {
+    let relay = null;
+    try {
+      relay = localStorage.getItem('app_data_relay');
+    } catch (_) {}
+    localStorage.clear();
+    if (relay) try {
+      localStorage.setItem('app_data_relay', relay);
+    } catch (_) {}
+  }
 };
 const ACTIVITY = {
   sedentary: {
@@ -906,7 +915,33 @@ const driveSync = (() => {
     }
   };
 })();
+try {
+  if (navigator.storage && navigator.storage.persist) navigator.storage.persist().catch(() => {});
+} catch (_) {}
 const ANTHROPIC_URL = "https://api.anthropic.com/v1/messages";
+const MODEL_KEY = 'ai_model';
+const AI_MODELS = [{
+  id: 'claude-sonnet-5-5',
+  label: 'Sonnet 5.5',
+  note: 'Fast. The default.'
+}, {
+  id: 'claude-opus-5-5',
+  label: 'Opus 5.5',
+  note: 'Slower, most careful estimates.'
+}, {
+  id: 'claude-opus-5',
+  label: 'Opus 5',
+  note: 'The previous model, for comparison.'
+}, {
+  id: 'claude-haiku-5-5',
+  label: 'Haiku 5.5',
+  note: 'Fastest and cheapest, least careful.'
+}];
+const DEFAULT_MODEL = 'claude-sonnet-5-5';
+const currentModel = () => {
+  const m = S.get(MODEL_KEY);
+  return AI_MODELS.some(x => x.id === m) ? m : DEFAULT_MODEL;
+};
 const anthropicCall = async (messages, apiKey, maxTokens) => {
   if (!apiKey) {
     const e = new Error('NO_API_KEY');
@@ -924,7 +959,7 @@ const anthropicCall = async (messages, apiKey, maxTokens) => {
         "anthropic-dangerous-direct-browser-access": "true"
       },
       body: JSON.stringify({
-        model: "claude-opus-5",
+        model: currentModel(),
         max_tokens: maxTokens,
         output_config: {
           effort: "low"
@@ -1702,7 +1737,7 @@ function ZoomablePreview({
     onClose: () => setOpen(false)
   }));
 }
-const BUILD_VERSION = '2026-10-01a-drive-relay-autosync';
+const BUILD_VERSION = '2026-10-31a-model-picker';
 const SMOOTH_DAYS = 14;
 const TDEE_WINDOW = 21;
 const KCAL_PER_KG = 7400;
@@ -8078,6 +8113,11 @@ function SettingsView({
   const [mode, setMode] = useState(targets?.mode === 'manual' ? 'manual' : 'calculated');
   const [keyInput, setKeyInput] = useState('');
   const [keyVisible, setKeyVisible] = useState(false);
+  const [aiModel, setAiModel] = useState(currentModel);
+  const pickModel = id => {
+    setAiModel(id);
+    S.set(MODEL_KEY, id);
+  };
   const [confirmReset, setConfirmReset] = useState(false);
   const importRef = useRef();
   const [driveOn, setDriveOn] = useState(() => driveSync.linked());
@@ -8304,7 +8344,23 @@ function SettingsView({
       ...secondaryBtn,
       marginTop: 0
     }
-  }, "Cancel")))), React.createElement(SectionHeader, null, "Profile"), React.createElement("div", {
+  }, "Cancel")))), React.createElement(SectionHeader, null, "AI model"), React.createElement("div", {
+    style: cardStyle
+  }, React.createElement(Pills, {
+    value: aiModel,
+    onChange: pickModel,
+    options: AI_MODELS.map(m => ({
+      v: m.id,
+      l: m.label
+    }))
+  }), React.createElement("div", {
+    style: {
+      fontSize: 12,
+      color: C.inkMuted,
+      marginTop: 10,
+      lineHeight: 1.45
+    }
+  }, (AI_MODELS.find(m => m.id === aiModel) || AI_MODELS[0]).note, " Used for photos, labels, descriptions and corrections. Saved on this phone only.")), React.createElement(SectionHeader, null, "Profile"), React.createElement("div", {
     style: cardStyle
   }, React.createElement(Field, {
     label: "Your name"
@@ -8549,7 +8605,28 @@ function SettingsView({
     style: {
       color: C.inkMuted
     }
-  }, DRIVE_FOLDER), " in your Drive, updated automatically a few seconds after each change, so a new phone can be set up from it. It goes through the App Data relay, a small script in your own Google account, so there is no Google sign-in on the phone and nothing expires. The same link works in Receipts, and unlinking here unlinks both. Your API key is never included."), !driveOn ? React.createElement("div", null, React.createElement("input", {
+  }, DRIVE_FOLDER), " in your Drive, updated automatically a few seconds after each change, so a new phone can be set up from it. It goes through the App Data relay, a small script in your own Google account, so there is no Google sign-in on the phone and nothing expires. The same link works in Receipts, and unlinking here unlinks both. Your API key is never included."), !driveOn ? React.createElement("div", null, React.createElement("div", {
+    style: {
+      fontSize: 12,
+      color: C.inkMuted,
+      marginBottom: 10,
+      lineHeight: 1.5
+    }
+  }, "One-time setup, about 5 minutes on a computer: open ", React.createElement("a", {
+    href: "https://script.google.com",
+    target: "_blank",
+    rel: "noopener",
+    style: {
+      color: C.accent
+    }
+  }, "script.google.com"), ", make a new project, paste in ", React.createElement("a", {
+    href: "https://raw.githubusercontent.com/jules1342/macro/main/drive-relay/Code.gs",
+    target: "_blank",
+    rel: "noopener",
+    style: {
+      color: C.accent
+    }
+  }, "the relay script"), ", deploy it as a Web app (Execute as Me, access Anyone), run ", React.createElement("b", null, "setup"), ", then paste the link it logs here. After that you never sign in again."), React.createElement("input", {
     value: relayInput,
     onChange: e => setRelayInput(e.target.value),
     placeholder: "Paste the relay link (\u2026/exec?k=\u2026)",
@@ -9597,7 +9674,7 @@ class ErrorBoundary extends React.Component {
       onClick: () => {
         if (window.confirm('Clear all saved data on this device? This cannot be undone.')) {
           try {
-            localStorage.clear();
+            S.wipe();
           } catch (_) {}
           window.location.reload();
         }
