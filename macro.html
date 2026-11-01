@@ -661,19 +661,54 @@
       let result;
       try { result = await resp.json(); }
       catch (_) { const e = new Error('service returned a non-JSON response'); e.kind = 'bad_response'; throw e; }
-      return (result.content || []).filter(c => c.type === 'text').map(c => c.text).join('').trim();
+      const text = (result.content || []).filter(c => c.type === 'text').map(c => c.text).join('').trim();
+      // Name the two stop reasons that otherwise look like a garbled reply.
+      if (result.stop_reason === 'max_tokens') {
+        const e = new Error('the AI ran out of room before finishing its answer (try a lower reasoning effort, or tell me)');
+        e.kind = 'bad_response'; e.retryable = true; e.body = text.slice(-300); throw e;
+      }
+      if (result.stop_reason === 'refusal') {
+        const e = new Error('the AI declined to answer this one'); e.kind = 'bad_response'; throw e;
+      }
+      return text;
     };
 
     // Parse a JSON object out of the model's text reply. Throws kind:'bad_response'
     // with a snippet of what came back if it isn't valid JSON.
+    // Newer models sometimes wrap the JSON in a sentence or a code fence, or add
+    // a note after it. Take the first complete {...} object rather than
+    // requiring the whole reply to be bare JSON.
+    const firstJsonObject = (t) => {
+      const start = t.indexOf('{');
+      if (start < 0) return null;
+      let depth = 0, inStr = false, esc = false;
+      for (let i = start; i < t.length; i++) {
+        const c = t[i];
+        if (inStr) { if (esc) esc = false; else if (c === '\\') esc = true; else if (c === '"') inStr = false; continue; }
+        if (c === '"') inStr = true;
+        else if (c === '{') depth++;
+        else if (c === '}' && --depth === 0) return t.slice(start, i + 1);
+      }
+      return null;
+    };
     const parseJsonReply = (text) => {
-      const cleaned = (text || '').replace(/^```json\s*/i, '').replace(/```$/, '').trim();
-      try { return JSON.parse(cleaned); }
-      catch (_) {
-        const e = new Error('the AI reply was not in the expected format');
-        e.kind = 'bad_response';
-        e.body = cleaned.slice(0, 300);
-        throw e;
+      const cleaned = (text || '').replace(/```(?:json)?/gi, '').trim();
+      try { return JSON.parse(cleaned); } catch (_) {}
+      const obj = firstJsonObject(cleaned);
+      if (obj) { try { return JSON.parse(obj); } catch (_) {} }
+      const e = new Error('the AI reply was not in the expected format');
+      e.kind = 'bad_response';
+      e.retryable = true;
+      e.body = cleaned.slice(0, 300);
+      throw e;
+    };
+    // One silent retry when a reply cannot be read, before showing an error.
+    const withRetry = async (fn) => {
+      try { return await fn(); }
+      catch (e) {
+        if (!e || !e.retryable) throw e;
+        try { logError('ai_reply_retry', e, null); } catch (_) {}
+        return await fn();
       }
     };
 
@@ -682,20 +717,22 @@
       let parts;
       try { parts = await imageToParts(fileOrDataUrl); }
       catch (e) { if (!e.kind) e.kind = 'decode'; throw e; }
-      const text = await anthropicCall([{
-        role: "user",
-        content: [
-          { type: "image", source: { type: "base64", media_type: parts.mediaType, data: parts.data } },
-          { type: "text", text: prompt }
-        ]
-      }], apiKey, 12000);
-      return parseJsonReply(text);
+      return withRetry(async () => {
+        const text = await anthropicCall([{
+          role: "user",
+          content: [
+            { type: "image", source: { type: "base64", media_type: parts.mediaType, data: parts.data } },
+            { type: "text", text: prompt }
+          ]
+        }], apiKey, 12000);
+        return parseJsonReply(text);
+      });
     };
 
-    const callText = async (prompt, apiKey) => {
+    const callText = (prompt, apiKey) => withRetry(async () => {
       const text = await anthropicCall([{ role: "user", content: prompt }], apiKey, 10000);
       return parseJsonReply(text);
-    };
+    });
 
     // The model's per-item breakdown, cleaned into the shape the app stores.
     // Anything not an array, or an item with no name, is dropped.
@@ -1152,7 +1189,7 @@ Return ONLY a JSON object (no markdown, no preamble):
     // while the camera intent is foregrounded), the tab silently reloads.
     // We use localStorage (not sessionStorage) because a full process kill
     // can wipe sessionStorage but leaves localStorage intact.
-    const BUILD_VERSION = '2026-11-01e-vision-middle';
+    const BUILD_VERSION = '2026-11-01f-robust-json';
     // Window for the rolling-average line on the intake charts, in days.
     const SMOOTH_DAYS = 14;
     // Trailing window for each point on the maintenance-over-time chart. The
