@@ -260,9 +260,20 @@
     // Try to decode + downscale a blob, using createImageBitmap (low memory)
     // then falling back to an <img> element. Throws a real Error on failure,
     // carrying the underlying reason.
-    const tryDecode = async (src, maxDim) => {
+    const tryDecode = async (src, maxDim, dims) => {
       let bitmapErr = null;
-      if (typeof createImageBitmap === 'function') {
+      if (typeof createImageBitmap === 'function' && dims) {
+        // Size known: resize once along the long side, never upscaling.
+        try {
+          const long = Math.max(dims.w, dims.h);
+          const opt = dims.w >= dims.h
+            ? { resizeWidth: Math.min(maxDim, long), resizeQuality: 'high' }
+            : { resizeHeight: Math.min(maxDim, long), resizeQuality: 'high' };
+          const bitmap = await createImageBitmap(src, opt);
+          return { source: bitmap, w: bitmap.width, h: bitmap.height, cleanup: () => bitmap.close() };
+        } catch (e) { bitmapErr = e; }
+      }
+      if (typeof createImageBitmap === 'function' && !dims) {
         try {
           // Pass only one resize dim so aspect ratio is preserved.
           let bitmap = await createImageBitmap(src, { resizeWidth: maxDim, resizeQuality: 'high' });
@@ -356,8 +367,39 @@
       }
     };
 
-    // Compress at vision-suitable resolution (~1280px) for the API call.
-    const compressForVision = (file) => compressImageToDataURL(file, 1280, 0.82);
+    // Read an image's pixel size without decoding the pixels (header only).
+    const imageDims = (file) => new Promise((res) => {
+      const url = URL.createObjectURL(file);
+      const img = new Image();
+      img.onload = () => { const d = { w: img.naturalWidth, h: img.naturalHeight }; URL.revokeObjectURL(url); res(d.w && d.h ? d : null); };
+      img.onerror = () => { URL.revokeObjectURL(url); res(null); };
+      img.src = url;
+    });
+
+    // The image the model sees. Opus 5.5 reads images natively up to 2576 px on
+    // the long edge and 4784 visual tokens (28x28 px each); anything bigger is
+    // downscaled by the API anyway. So send the largest image under both
+    // limits, encoded once at high quality. It used to be 1280 px at 0.82, and
+    // camera shots were JPEG-compressed twice on the way, which blurred label
+    // text and food texture. Cost: up to ~4.8k input tokens a photo, about
+    // 2 US cents on Opus 5.5.
+    const VISION_MAX_EDGE = 2576;
+    const VISION_MAX_AREA = 4600 * 28 * 28; // a little under the 4784-token cap
+    const compressForVision = async (file) => {
+      const dims = await imageDims(file);
+      let edge = 1568; // safe size if the dimensions cannot be read (e.g. HEIC)
+      if (dims) {
+        const long = Math.max(dims.w, dims.h);
+        const scale = Math.min(1, VISION_MAX_EDGE / long, Math.sqrt(VISION_MAX_AREA / (dims.w * dims.h)));
+        edge = Math.floor(long * scale);
+      }
+      try {
+        const { source, w, h, cleanup } = dims ? await tryDecode(file, edge, dims) : await decodeAtMaxDim(file, edge);
+        try { return encodeToDataURL(source, w, h, 0.9); } finally { cleanup(); }
+      } catch (_) {
+        return compressImageToDataURL(file, 1568, 0.9);
+      }
+    };
 
     // Extract base64 + media type from either a File or a data: URL string
     const imageToParts = async (fileOrDataUrl) => {
@@ -1111,7 +1153,7 @@ Return ONLY a JSON object (no markdown, no preamble):
     // while the camera intent is foregrounded), the tab silently reloads.
     // We use localStorage (not sessionStorage) because a full process kill
     // can wipe sessionStorage but leaves localStorage intact.
-    const BUILD_VERSION = '2026-11-01c-effort-picker';
+    const BUILD_VERSION = '2026-11-01d-sharper-images';
     // Window for the rolling-average line on the intake charts, in days.
     const SMOOTH_DAYS = 14;
     // Trailing window for each point on the maintenance-over-time chart. The
@@ -3030,17 +3072,30 @@ Return ONLY a JSON object (no markdown, no preamble):
           const v = videoRef.current;
           const w = v.videoWidth, h = v.videoHeight;
           if (!w || !h) throw new Error('camera not ready yet');
-          const maxDim = 1600;
-          let dw = w, dh = h;
-          if (w > maxDim || h > maxDim) {
-            if (w > h) { dh = Math.round(h * maxDim / w); dw = maxDim; }
-            else { dw = Math.round(w * maxDim / h); dh = maxDim; }
+          // A real still photo from the same in-page camera (ImageCapture), which
+          // is sharper and less noisy than a video frame and still never leaves
+          // the page, so Android has nothing to kill. Falls back to a full-size
+          // video frame if the phone refuses or takes too long.
+          let blob = null, how = 'frame';
+          try {
+            const track = streamRef.current && streamRef.current.getVideoTracks()[0];
+            if (track && typeof ImageCapture === 'function') {
+              const ic = new ImageCapture(track);
+              blob = await Promise.race([
+                ic.takePhoto(),
+                new Promise((_, rej) => setTimeout(() => rej(new Error('takePhoto timed out')), 6000)),
+              ]);
+              if (!blob || blob.size < 2000) blob = null; else how = 'photo';
+            }
+          } catch (e) { blob = null; try { logError('camera_takePhoto', e, null); } catch (_) {} }
+          if (!blob) {
+            const canvas = document.createElement('canvas');
+            canvas.width = w; canvas.height = h;
+            canvas.getContext('2d').drawImage(v, 0, 0, w, h);
+            blob = await new Promise(res => canvas.toBlob(res, 'image/jpeg', 0.95));
+            canvas.width = 0; canvas.height = 0;
           }
-          const canvas = document.createElement('canvas');
-          canvas.width = dw; canvas.height = dh;
-          canvas.getContext('2d').drawImage(v, 0, 0, dw, dh);
-          const blob = await new Promise(res => canvas.toBlob(res, 'image/jpeg', 0.9));
-          canvas.width = 0; canvas.height = 0;
+          try { localStorage.setItem('macro_last_capture', JSON.stringify({ how, kb: Math.round(blob.size / 1024), ts: Date.now() })); } catch (_) {}
           stopStream();
           onCapture(new File([blob], `capture-${Date.now()}.jpg`, { type: 'image/jpeg' }));
         } catch (e) { setErr(cameraErrMsg(e)); setBusy(false); }
@@ -3136,9 +3191,10 @@ Return ONLY a JSON object (no markdown, no preamble):
           const vd = await compressForVision(f);
           setVisionData(vd);
           setPreview(vd);
-          // Small thumbnail kept with the entry, so History and Edit can show
-          // what was eaten. ~10 KB, so a year of photo meals fits in storage.
-          try { setThumb(await compressImageToDataURL(f, 256, 0.7)); } catch (_) { setThumb(null); }
+          // Copy kept with the entry, for History, Edit and re-analysis after an
+          // edit. 384 px at 0.8 is about 25 KB: sharp on a phone screen, and
+          // about 2.5x the old 256 px at 0.7, which looked mushy.
+          try { setThumb(await compressImageToDataURL(f, 384, 0.8)); } catch (_) { setThumb(null); }
           URL.revokeObjectURL(previewUrl);
 
           if (useMode === 'label') {
@@ -5211,6 +5267,26 @@ Return ONLY a JSON object (no markdown, no preamble):
               {navigator.onLine ? 'online' : 'offline'}
             </div>
           </div>
+          {(() => {
+            // Storage is localStorage, capped near 5 MB per site (shared with
+            // Receipts). Photos are the only large thing in it.
+            let chars = 0, photos = 0;
+            try {
+              for (const k of Object.keys(localStorage)) {
+                const v = localStorage.getItem(k) || '';
+                chars += k.length + v.length;
+                if (k.startsWith('log:')) photos += (v.match(/data:image/g) || []).length;
+              }
+            } catch (_) {}
+            let cap = null;
+            try { cap = JSON.parse(localStorage.getItem('macro_last_capture') || 'null'); } catch (_) {}
+            return (
+              <div style={{ ...cardStyle, fontSize: 12, color: C.inkMuted, lineHeight: 1.6 }}>
+                <div>Storage used: <b style={{ color: C.ink }}>{(chars / 1e6).toFixed(1)} MB</b> of about 5 MB, {photos} saved meal photo{photos === 1 ? '' : 's'}</div>
+                {cap && <div>Last camera shot: {cap.how === 'photo' ? 'full still photo' : 'video frame (still photo unavailable)'}, {cap.kb} KB</div>}
+              </div>
+            );
+          })()}
           <ErrorLogCard/>
 
           <div style={cardStyle}>

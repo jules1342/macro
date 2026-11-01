@@ -87,13 +87,17 @@ The related fix: the TDEE intake loop stops before the final weigh-in day. `days
 
 `KCAL_PER_KG` is the energy density of weight change and is set to 7,400, not the folk 7,700. The 7,700 comes from Wishnofsky (1958), who assumed the lost tissue is adipose at 87% fat, and it is the same constant as the "3,500 kcal per pound" rule. Hall (2008, *Int J Obes*) modelled it properly: fat stores about 9,440 kcal/kg and lean tissue about 1,815, and the blend depends on how much of the loss is lean, which the Forbes relationship ties to initial fat mass. His conclusion: 7,700 "approximately matches" people with more than about 30 kg of body fat and "overestimates" for anyone leaner. For someone of Julian's build the blend is roughly 7,300 to 7,400. The sensitivity is small in a 21-day window (a 400 kcal/kg change moves TDEE by about 10 kcal/day), which is why it is one constant and not a per-person model.
 
+## Images sent to the model
+
+`compressForVision` reads the image size from the header (`imageDims`), then decodes once to the largest size under `VISION_MAX_EDGE` (2576 px) and `VISION_MAX_AREA` (4600 visual tokens of 28x28 px), never upscaling, and encodes at JPEG 0.9. Those are the high-resolution tier limits; the API would downscale anything bigger anyway. If the size cannot be read (HEIC), it falls back to 1568 px. The camera's `capture` uses `ImageCapture.takePhoto()` with a 6 second timeout and falls back to a full-resolution video frame at 0.95; `macro_last_capture` records which, shown in Diagnostics.
+
 ## Dates
 
 Every storage key is a local `YYYY-MM-DD` from `dateStr()`. Do not use `toISOString().split('T')[0]` for a key: it is the UTC date, which in Australia is yesterday until about 10 am. That one mistake put a seeded "today" entry under the wrong day during testing and would do the same to a real log at dinner time. Older loops in `buildSeries` and the TDEE windows still use `toISOString` internally; they are consistent with themselves because they iterate from a UTC-derived start, but any new code should use `dateStr`.
 
 ## Storage
 
-localStorage, about 5 MB. Photo meals now carry a 256px thumbnail (~10 KB), which is the only large thing stored. `S.set` throws a tagged `quota` error when the store is full instead of swallowing it; `saveLog` catches that, retries the day without its images, and alerts. Before this a full store silently dropped the entry.
+localStorage, about 5 MB. Photo meals carry a 384px copy at JPEG 0.8 (~25 KB), the only large thing stored. It is also what re-analysis after an edit sends to the model. Diagnostics shows storage used and the photo count. The cap is about 5 MB per origin, shared with Receipts; bigger saved photos need IndexedDB. `S.set` throws a tagged `quota` error when the store is full instead of swallowing it; `saveLog` catches that, retries the day without its images, and alerts. Before this a full store silently dropped the entry.
 
 ## Decisions that look wrong but are not
 
