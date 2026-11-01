@@ -376,15 +376,14 @@
       img.src = url;
     });
 
-    // The image the model sees. Opus 5.5 reads images natively up to 2576 px on
-    // the long edge and 4784 visual tokens (28x28 px each); anything bigger is
-    // downscaled by the API anyway. So send the largest image under both
-    // limits, encoded once at high quality. It used to be 1280 px at 0.82, and
-    // camera shots were JPEG-compressed twice on the way, which blurred label
-    // text and food texture. Cost: up to ~4.8k input tokens a photo, about
-    // 2 US cents on Opus 5.5.
-    const VISION_MAX_EDGE = 2576;
-    const VISION_MAX_AREA = 4600 * 28 * 28; // a little under the 4784-token cap
+    // The image the model sees. Tokens depend only on pixel size (one per 28x28
+    // px block), not on JPEG quality, so quality is set high (0.9, encoded once)
+    // and size is the cost dial. ~1600 px and ~2400 tokens is Julian's middle
+    // ground (2026-11-01): plenty for label text and portion judgement, about
+    // 1 US cent a photo on Opus 5.5, half the 2576 px native maximum. The old
+    // blur came from compressing camera shots twice at 0.82, not from size.
+    const VISION_MAX_EDGE = 1600;
+    const VISION_MAX_AREA = 2400 * 28 * 28;
     const compressForVision = async (file) => {
       const dims = await imageDims(file);
       let edge = 1568; // safe size if the dimensions cannot be read (e.g. HEIC)
@@ -1153,7 +1152,7 @@ Return ONLY a JSON object (no markdown, no preamble):
     // while the camera intent is foregrounded), the tab silently reloads.
     // We use localStorage (not sessionStorage) because a full process kill
     // can wipe sessionStorage but leaves localStorage intact.
-    const BUILD_VERSION = '2026-11-01d-sharper-images';
+    const BUILD_VERSION = '2026-11-01e-vision-middle';
     // Window for the rolling-average line on the intake charts, in days.
     const SMOOTH_DAYS = 14;
     // Trailing window for each point on the maintenance-over-time chart. The

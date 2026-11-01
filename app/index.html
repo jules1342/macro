@@ -747,8 +747,8 @@ const imageDims = file => new Promise(res => {
   };
   img.src = url;
 });
-const VISION_MAX_EDGE = 2576;
-const VISION_MAX_AREA = 4600 * 28 * 28;
+const VISION_MAX_EDGE = 1600;
+const VISION_MAX_AREA = 2400 * 28 * 28;
 const compressForVision = async file => {
   const dims = await imageDims(file);
   let edge = 1568;
@@ -1814,7 +1814,7 @@ function ZoomablePreview({
     onClose: () => setOpen(false)
   }));
 }
-const BUILD_VERSION = '2026-11-01d-sharper-images';
+const BUILD_VERSION = '2026-11-01e-vision-middle';
 const SMOOTH_DAYS = 14;
 const TDEE_WINDOW = 21;
 const KCAL_PER_KG = 7400;

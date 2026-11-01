@@ -89,7 +89,7 @@ The related fix: the TDEE intake loop stops before the final weigh-in day. `days
 
 ## Images sent to the model
 
-`compressForVision` reads the image size from the header (`imageDims`), then decodes once to the largest size under `VISION_MAX_EDGE` (2576 px) and `VISION_MAX_AREA` (4600 visual tokens of 28x28 px), never upscaling, and encodes at JPEG 0.9. Those are the high-resolution tier limits; the API would downscale anything bigger anyway. If the size cannot be read (HEIC), it falls back to 1568 px. The camera's `capture` uses `ImageCapture.takePhoto()` with a 6 second timeout and falls back to a full-resolution video frame at 0.95; `macro_last_capture` records which, shown in Diagnostics.
+`compressForVision` reads the image size from the header (`imageDims`), then decodes once to the largest size under `VISION_MAX_EDGE` (1600 px) and `VISION_MAX_AREA` (2400 visual tokens of 28x28 px), never upscaling, and encodes at JPEG 0.9. Tokens depend on pixel size only, not JPEG quality, so quality stays high and size is the cost dial. The model could read up to 2576 px / 4784 tokens, but that doubles the cost for little gain on food and labels. If the size cannot be read (HEIC), it falls back to 1568 px. The camera's `capture` uses `ImageCapture.takePhoto()` with a 6 second timeout and falls back to a full-resolution video frame at 0.95; `macro_last_capture` records which, shown in Diagnostics.
 
 ## Dates
 
