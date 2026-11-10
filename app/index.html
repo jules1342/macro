@@ -1264,6 +1264,7 @@ Return ONLY a JSON object (no markdown fences, no preamble) with this shape:
   "notes": "any caveats or assumptions",
   "questions": ["question 1", "question 2"]
 }`, key);
+const fmtServings = n => `${Math.round(n * 100) / 100} serving${n === 1 ? '' : 's'}`;
 const labelNum = v => v == null || v === '' || !Number.isFinite(+v) ? null : +v;
 const kcalFromBlock = b => {
   if (!b) return null;
@@ -1315,6 +1316,7 @@ const normaliseLabel = raw => {
     product_name: raw.product_name || null,
     serving_size_text: raw.serving_size_text || null,
     serving_size_g: ssg,
+    servings_per_pack: labelNum(raw.servings_per_pack),
     per_serving: ps,
     per_100g: p100.calories != null ? p100 : null
   };
@@ -1341,6 +1343,7 @@ Return ONLY this JSON (no markdown, no preamble):
   "product_name": "legible product name, or null",
   "serving_size_text": "as printed, e.g. '95g' or '1 cup (250mL)', or null",
   "serving_size_g": <grams as number, or null>,
+  "servings_per_pack": <"servings per package" as printed, as a number, or null>,
   "per_serving": { "energy_kj": <number|null>, "energy_kcal": <number|null>, "protein_g": <number|null>, "carbs_g": <number|null>, "fat_g": <number|null> },
   "per_100g":   { "energy_kj": <number|null>, "energy_kcal": <number|null>, "protein_g": <number|null>, "carbs_g": <number|null>, "fat_g": <number|null> }
 }`, key);
@@ -1862,7 +1865,7 @@ function ZoomablePreview({
     onClose: () => setOpen(false)
   }));
 }
-const BUILD_VERSION = '2026-11-01f-robust-json';
+const BUILD_VERSION = '2026-11-10a-label-servings';
 const SMOOTH_DAYS = 14;
 const TDEE_WINDOW = 21;
 const KCAL_PER_KG = 7400;
@@ -5121,6 +5124,8 @@ function PhotoTab({
   const [corrections, setCorrections] = useState([]);
   const [label, setLabel] = useState(null);
   const [grams, setGrams] = useState('');
+  const [amountBy, setAmountBy] = useState('grams');
+  const [servings, setServings] = useState(1);
   const [name, setName] = useState('');
   const fileRef = useRef();
   const [cameraOpen, setCameraOpen] = useState(false);
@@ -5135,6 +5140,8 @@ function PhotoTab({
     setLabel(null);
     setGrams('');
     setName('');
+    setAmountBy('grams');
+    setServings(1);
   };
   const handle = async (f, forcedMode) => {
     if (!f) return;
@@ -5175,6 +5182,8 @@ function PhotoTab({
         setLabel(r);
         setName(r.product_name || '');
         if (r.serving_size_g) setGrams(String(r.serving_size_g));
+        setAmountBy('grams');
+        setServings(1);
       } else {
         const r = await analyseFoodImage(vd, apiKey);
         setResult({
@@ -5249,12 +5258,25 @@ function PhotoTab({
     const next = corrections.filter((_, j) => j !== i);
     await runFoodAnalysis(next);
   };
+  const canServings = label?.per_serving?.calories != null;
+  const bySv = amountBy === 'servings' && canServings;
   const computed = useMemo(() => {
     if (!label) return null;
-    const g = num(grams);
-    if (!g) return null;
     const ps = label.per_serving;
     const per100 = label.per_100g;
+    if (bySv) {
+      const n = num(servings);
+      if (!n) return null;
+      return {
+        calories: Math.round(ps.calories * n),
+        protein: Math.round((ps.protein_g || 0) * n),
+        carbs: Math.round((ps.carbs_g || 0) * n),
+        fat: Math.round((ps.fat_g || 0) * n),
+        basis: `${fmtServings(n)}`
+      };
+    }
+    const g = num(grams);
+    if (!g) return null;
     if (ps && ps.calories != null && label.serving_size_g) {
       const f = g / label.serving_size_g;
       return {
@@ -5276,12 +5298,18 @@ function PhotoTab({
       };
     }
     return null;
-  }, [label, grams]);
+  }, [label, grams, servings, bySv]);
+  const labelPortion = () => {
+    if (!bySv) return `${grams}g`;
+    const n = num(servings);
+    const g = label.serving_size_g ? Math.round(n * label.serving_size_g) : null;
+    return g ? `${fmtServings(n)} (${g}g)` : fmtServings(n);
+  };
   const saveLabel = () => {
     if (!computed) return;
     onSave({
       name: name || 'Packaged food',
-      portion: `${grams}g`,
+      portion: labelPortion(),
       calories: computed.calories,
       protein: computed.protein,
       carbs: computed.carbs,
@@ -5291,7 +5319,8 @@ function PhotoTab({
         per_100g: label.per_100g || null,
         per_serving: label.per_serving || null,
         serving_size_g: label.serving_size_g || null,
-        serving_size_text: label.serving_size_text || null
+        serving_size_text: label.serving_size_text || null,
+        servings_per_pack: label.servings_per_pack || null
       } : null,
       source: 'label'
     });
@@ -5367,7 +5396,7 @@ function PhotoTab({
       marginBottom: 18,
       lineHeight: 1.5
     }
-  }, mode === 'label' ? 'Photograph the nutrition panel. Claude reads it and you enter how many grams you ate.' : 'Photograph the meal itself. Claude estimates portion size and macros.'), React.createElement("button", {
+  }, mode === 'label' ? 'Photograph the nutrition panel. Claude reads it and you enter how many grams or servings you ate.' : 'Photograph the meal itself. Claude estimates portion size and macros.'), React.createElement("button", {
     onClick: () => launch('camera'),
     style: cameraBtn
   }, React.createElement(IconCamera, {
@@ -5415,14 +5444,92 @@ function PhotoTab({
     }
   }, "Extracted from label"), label.serving_size_text && React.createElement("div", null, "Serving: ", React.createElement("span", {
     className: "num"
-  }, label.serving_size_text)), label.per_serving?.calories != null && React.createElement("div", {
+  }, label.serving_size_text)), label.servings_per_pack > 0 && React.createElement("div", null, "Servings per pack: ", React.createElement("span", {
+    className: "num"
+  }, label.servings_per_pack)), label.per_serving?.calories != null && React.createElement("div", {
     className: "num"
   }, "Per serving: ", label.per_serving.calories, " kcal \xB7 P ", label.per_serving.protein_g ?? '?', "g \xB7 C ", label.per_serving.carbs_g ?? '?', "g \xB7 F ", label.per_serving.fat_g ?? '?', "g"), label.per_100g?.calories != null && React.createElement("div", {
     className: "num",
     style: {
       color: C.inkSoft
     }
-  }, "Per 100g: ", label.per_100g.calories, " kcal \xB7 P ", label.per_100g.protein_g ?? '?', "g \xB7 C ", label.per_100g.carbs_g ?? '?', "g \xB7 F ", label.per_100g.fat_g ?? '?', "g")), React.createElement(Field, {
+  }, "Per 100g: ", label.per_100g.calories, " kcal \xB7 P ", label.per_100g.protein_g ?? '?', "g \xB7 C ", label.per_100g.carbs_g ?? '?', "g \xB7 F ", label.per_100g.fat_g ?? '?', "g")), canServings && React.createElement("div", {
+    style: {
+      display: 'flex',
+      background: C.surface,
+      padding: 4,
+      borderRadius: 10,
+      border: `1px solid ${C.line}`,
+      marginBottom: 12
+    }
+  }, [{
+    v: 'grams',
+    l: 'Grams'
+  }, {
+    v: 'servings',
+    l: 'Servings'
+  }].map(o => React.createElement("button", {
+    key: o.v,
+    onClick: () => setAmountBy(o.v),
+    style: {
+      flex: 1,
+      border: 'none',
+      padding: '8px 8px',
+      borderRadius: 7,
+      background: amountBy === o.v ? C.ink : 'transparent',
+      color: amountBy === o.v ? C.bg : C.inkMuted,
+      fontWeight: amountBy === o.v ? 500 : 400,
+      fontSize: 14,
+      fontFamily: fonts.body,
+      cursor: 'pointer'
+    }
+  }, o.l))), bySv ? React.createElement(Field, {
+    label: "How many servings did you eat?"
+  }, React.createElement(NumberInput, {
+    value: servings,
+    onChange: setServings,
+    suffix: num(servings) === 1 ? 'serving' : 'servings',
+    step: "0.5"
+  }), React.createElement("div", {
+    style: {
+      display: 'flex',
+      flexWrap: 'wrap',
+      gap: 6,
+      marginTop: 8
+    }
+  }, [0.5, 1, 2, 3, 4].map(n => React.createElement("button", {
+    key: n,
+    onClick: () => setServings(n),
+    style: {
+      border: `1px solid ${num(servings) === n ? C.ink : C.line}`,
+      background: num(servings) === n ? C.ink : C.surface,
+      color: num(servings) === n ? C.bg : C.inkMuted,
+      borderRadius: 16,
+      padding: '6px 12px',
+      fontSize: 13,
+      fontFamily: fonts.body,
+      cursor: 'pointer'
+    }
+  }, n === 0.5 ? '½' : n)), label.servings_per_pack > 0 && ![0.5, 1, 2, 3, 4].includes(label.servings_per_pack) && React.createElement("button", {
+    onClick: () => setServings(label.servings_per_pack),
+    style: {
+      border: `1px solid ${num(servings) === label.servings_per_pack ? C.ink : C.line}`,
+      background: num(servings) === label.servings_per_pack ? C.ink : C.surface,
+      color: num(servings) === label.servings_per_pack ? C.bg : C.inkMuted,
+      borderRadius: 16,
+      padding: '6px 12px',
+      fontSize: 13,
+      fontFamily: fonts.body,
+      cursor: 'pointer'
+    }
+  }, "Whole pack (", label.servings_per_pack, ")")), label.serving_size_g && num(servings) > 0 && React.createElement("div", {
+    className: "num",
+    style: {
+      fontSize: 12,
+      color: C.inkSoft,
+      marginTop: 8
+    }
+  }, "= ", Math.round(num(servings) * label.serving_size_g), "g")) : React.createElement(Field, {
     label: "How many grams did you eat?"
   }, React.createElement(NumberInput, {
     value: grams,
