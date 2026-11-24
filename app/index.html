@@ -1195,7 +1195,8 @@ const METHOD = `METHOD (follow this order, and do the arithmetic carefully):
 
 Never skip step 2 by recalling a whole-item figure directly. That is the single largest source of error.
 
-WRITING "notes": explain how you sized the food, then how that gives the numbers, as one chain. Lead with the sizing, in specifics: what the food is and how you identified it, which reference you sized it against and its real size, the dimensions you judged (width, depth or height), how you got from size to grams (including any density, stone, bone or peel), and anything you excluded and why. Then one short step: the per-100g values scaled to that weight. Add any caveats. Do not add a verification line, a "Check:" sum, or any macro-to-kcal arithmetic.`;
+WRITING "notes": explain how you sized the food, then how that gives the numbers, as one chain. Lead with the sizing, in specifics: what the food is and how you identified it, which reference you sized it against and its real size, the dimensions you judged (width, depth or height), how you got from size to grams (including any density, stone, bone or peel), and anything you excluded and why. Then one short step: the per-100g values scaled to that weight, which give the final calories and macros. Add any caveats.
+Write it as the working that produced the numbers, in the order you did it, so it reads as "this is how I got there". It must never read as checking, confirming or validating a result. Do not use words such as check, confirm, verify, validate, consistent with, close to or matches, and do not add a verification line, a "Check:" sum or any macro-to-kcal arithmetic.`;
 const analyseFoodImage = (file, key, extraContext) => callVision(file, `Analyse this food photograph. Identify the food(s) and estimate the total portion size visible.
 
 ${AU_CONTEXT}
@@ -1868,7 +1869,7 @@ function ZoomablePreview({
     onClose: () => setOpen(false)
   }));
 }
-const BUILD_VERSION = '2026-11-25b-notes-sizing';
+const BUILD_VERSION = '2026-11-25c-notes-as-working';
 const SMOOTH_DAYS = 14;
 const TDEE_WINDOW = 21;
 const KCAL_PER_KG = 7400;
