@@ -1190,9 +1190,12 @@ const METHOD = `METHOD (follow this order, and do the arithmetic carefully):
 2. Recall the macros PER 100g of that food, not the macros of one item. Per-100g figures are far more reliable than remembered per-item ones.
 3. Scale the per-100g figures to the actual weight from step 1.
 4. Sum the components.
-5. Reconcile before answering: protein x 4 + carbs x 4 + fat x 9 should land within about 10% of your kcal figure. If it does not, you have made an error in one of them. Find it and fix it rather than returning numbers that disagree.
+5. The kcal figure is the result of steps 1 to 4: the per-100g energy scaled to the weight and summed. It is not a separate estimate to be compared against anything.
+6. Before answering, privately make sure the numbers hang together (protein x 4 + carbs x 4 + fat x 9 lands near the kcal). If they do not, an earlier step is wrong, so go back and fix that step. This is an internal error check only. Never write it out, never mention it, and never present the calories as having been "checked" or "confirmed" against the macros.
 
-Never skip step 2 by recalling a whole-item figure directly. That is the single largest source of error.`;
+Never skip step 2 by recalling a whole-item figure directly. That is the single largest source of error.
+
+WRITING "notes": explain the reasoning that produced the numbers, as one chain: what the food is, the scale reference, the weight you settled on, and the per-100g values scaled to that weight, which give the calories and macros. Add any caveats or exclusions. Do not add a verification line, a "Check:" sum, or a closing reconciliation.`;
 const analyseFoodImage = (file, key, extraContext) => callVision(file, `Analyse this food photograph. Identify the food(s) and estimate the total portion size visible.
 
 ${AU_CONTEXT}
@@ -1261,7 +1264,7 @@ Return ONLY a JSON object (no markdown fences, no preamble) with this shape:
   "carbs_g": <integer>,
   "fat_g": <integer>,
   "confidence": "low" | "medium" | "high",
-  "notes": "any caveats or assumptions",
+  "notes": "the reasoning behind the numbers and any caveats (see WRITING notes)",
   "questions": ["question 1", "question 2"]
 }`, key);
 const fmtServings = n => `${Math.round(n * 100) / 100} serving${n === 1 ? '' : 's'}`;
@@ -1392,7 +1395,7 @@ Return ONLY a JSON object (no markdown, no preamble):
   "carbs_g": <integer>,
   "fat_g": <integer>,
   "confidence": "low" | "medium" | "high",
-  "notes": "any caveats or assumptions made",
+  "notes": "the reasoning behind the numbers and any caveats (see WRITING notes)",
   "questions": ["question 1", "question 2"]
 }`, key);
 const SvgBase = props => ({
@@ -1865,7 +1868,7 @@ function ZoomablePreview({
     onClose: () => setOpen(false)
   }));
 }
-const BUILD_VERSION = '2026-11-10a-label-servings';
+const BUILD_VERSION = '2026-11-25a-notes-no-check';
 const SMOOTH_DAYS = 14;
 const TDEE_WINDOW = 21;
 const KCAL_PER_KG = 7400;
